@@ -41,6 +41,7 @@ export interface Email {
 	message_id?: string | null;
 	raw_headers?: string | null;
 	attachments?: Attachment[];
+	labels?: Label[];
 	snippet?: string | null;
 	// Thread aggregate fields (only present in threaded list view)
 	thread_count?: number;
@@ -59,8 +60,31 @@ export interface Attachment {
 	disposition?: string;
 }
 
+export interface Label {
+	id: string;
+	name: string;
+	color: string;
+}
+
 export interface Folder {
 	id: string;
 	name: string;
 	unreadCount: number;
+}
+
+export interface RuleCondition {
+	field: "from" | "to" | "cc" | "subject" | "body";
+	operator: "contains" | "equals" | "starts_with" | "ends_with" | "matches";
+	value: string;
+}
+
+export interface Rule {
+	id: string;
+	name: string;
+	enabled: number;
+	match_all: number;
+	conditions: string; // JSON array
+	action_type: string;
+	action_params: string; // JSON object
+	created_at: string;
 }

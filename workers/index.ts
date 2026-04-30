@@ -154,15 +154,17 @@ app.get("/api/v1/mailboxes/:mailboxId/emails", async (c: AppContext) => {
 
 	if (threaded && folder) {
 		const emails = await (stub as any).getThreadedEmails({ folder, page, limit });
+		const emailsWithLabels = await (stub as any).enrichEmailsWithLabels(emails);
 		const totalCount = await (stub as any).countThreadedEmails(folder);
-		return c.json({ emails, totalCount });
+		return c.json({ emails: emailsWithLabels, totalCount });
 	}
 	const emails = await stub.getEmails({ folder, thread_id, page, limit, sortColumn, sortDirection });
+	const emailsWithLabels = await (stub as any).enrichEmailsWithLabels(emails);
 	if (folder) {
 		const totalCount = await stub.countEmails({ folder, thread_id });
-		return c.json({ emails, totalCount });
+		return c.json({ emails: emailsWithLabels, totalCount });
 	}
-	return c.json(emails);
+	return c.json(emailsWithLabels);
 });
 
 app.post("/api/v1/mailboxes/:mailboxId/emails", async (c: AppContext) => {
@@ -305,8 +307,99 @@ app.get("/api/v1/mailboxes/:mailboxId/search", async (c: AppContext) => {
 	};
 	const stub = c.var.mailboxStub as any;
 	const emails = await stub.searchEmails({ ...searchOpts, page: intQuery(c, "page"), limit: intQuery(c, "limit") });
+	const emailsWithLabels = await stub.enrichEmailsWithLabels(emails);
 	const totalCount = await stub.countSearchResults(searchOpts);
-	return c.json({ emails, totalCount });
+	return c.json({ emails: emailsWithLabels, totalCount });
+});
+
+// -- Labels ---------------------------------------------------------
+
+app.get("/api/v1/mailboxes/:mailboxId/labels", async (c: AppContext) => {
+	return c.json(await c.var.mailboxStub.getLabels());
+});
+
+app.post("/api/v1/mailboxes/:mailboxId/labels", async (c: AppContext) => {
+	const { name, color } = (await c.req.json()) as { name: string; color?: string };
+	if (!name?.trim()) return c.json({ error: "Label name is required" }, 400);
+	const id = slugify(name) || crypto.randomUUID();
+	const result = await c.var.mailboxStub.createLabel(id, name.trim(), color || "primary");
+	return result ? c.json(result, 201) : c.json({ error: "Label with this name already exists" }, 409);
+});
+
+app.delete("/api/v1/mailboxes/:mailboxId/labels/:id", async (c: AppContext) => {
+	await c.var.mailboxStub.deleteLabel(c.req.param("id")!);
+	return c.body(null, 204);
+});
+
+// -- Email Labels ----------------------------------------------------
+
+app.post("/api/v1/mailboxes/:mailboxId/emails/:emailId/labels", async (c: AppContext) => {
+	const { label_id } = (await c.req.json()) as { label_id: string };
+	const emailId = c.req.param("emailId")!;
+	await (c.var.mailboxStub as any).addEmailLabel(emailId, label_id);
+	return c.json({ status: "labeled" });
+});
+
+app.delete("/api/v1/mailboxes/:mailboxId/emails/:emailId/labels/:labelId", async (c: AppContext) => {
+	const emailId = c.req.param("emailId")!;
+	const labelId = c.req.param("labelId")!;
+	await (c.var.mailboxStub as any).removeEmailLabel(emailId, labelId);
+	return c.body(null, 204);
+});
+
+// -- Rules ----------------------------------------------------------
+
+app.get("/api/v1/mailboxes/:mailboxId/rules", async (c: AppContext) => {
+	return c.json(await c.var.mailboxStub.getRules());
+});
+
+app.post("/api/v1/mailboxes/:mailboxId/rules", async (c: AppContext) => {
+	const body = (await c.req.json()) as {
+		name: string;
+		enabled?: boolean;
+		match_all?: boolean;
+		conditions: Array<{ field: string; operator: string; value: string }>;
+		action_type: string;
+		action_params: Record<string, unknown>;
+	};
+	if (!body.name?.trim()) return c.json({ error: "Rule name is required" }, 400);
+	if (!body.conditions?.length) return c.json({ error: "At least one condition is required" }, 400);
+	if (!body.action_type) return c.json({ error: "Action type is required" }, 400);
+	const result = await c.var.mailboxStub.createRule({
+		id: crypto.randomUUID(),
+		name: body.name.trim(),
+		enabled: body.enabled ? 1 : 0,
+		match_all: body.match_all !== false ? 1 : 0,
+		conditions: JSON.stringify(body.conditions),
+		action_type: body.action_type,
+		action_params: JSON.stringify(body.action_params),
+	});
+	return c.json(result, 201);
+});
+
+app.put("/api/v1/mailboxes/:mailboxId/rules/:id", async (c: AppContext) => {
+	const body = (await c.req.json()) as Partial<{
+		name: string;
+		enabled: boolean;
+		match_all: boolean;
+		conditions: Array<{ field: string; operator: string; value: string }>;
+		action_type: string;
+		action_params: Record<string, unknown>;
+	}>;
+	const updates: Record<string, unknown> = {};
+	if (body.name !== undefined) updates.name = body.name.trim();
+	if (body.enabled !== undefined) updates.enabled = body.enabled ? 1 : 0;
+	if (body.match_all !== undefined) updates.match_all = body.match_all ? 1 : 0;
+	if (body.conditions !== undefined) updates.conditions = JSON.stringify(body.conditions);
+	if (body.action_type !== undefined) updates.action_type = body.action_type;
+	if (body.action_params !== undefined) updates.action_params = JSON.stringify(body.action_params);
+	const result = await c.var.mailboxStub.updateRule(c.req.param("id")!, updates);
+	return result ? c.json(result) : c.json({ error: "Rule not found" }, 404);
+});
+
+app.delete("/api/v1/mailboxes/:mailboxId/rules/:id", async (c: AppContext) => {
+	await c.var.mailboxStub.deleteRule(c.req.param("id")!);
+	return c.body(null, 204);
 });
 
 // -- Attachments ----------------------------------------------------

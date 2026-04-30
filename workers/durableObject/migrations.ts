@@ -168,4 +168,37 @@ export const mailboxMigrations: Migration[] = [
             CREATE INDEX IF NOT EXISTS idx_emails_folder_date ON emails(folder_id, date DESC);
         `,
 	},
+	{
+		name: "9_add_labels_and_rules",
+		sql: txn(`
+            CREATE TABLE labels (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                color TEXT NOT NULL DEFAULT 'primary',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE email_labels (
+                email_id TEXT NOT NULL,
+                label_id TEXT NOT NULL,
+                PRIMARY KEY (email_id, label_id),
+                FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE,
+                FOREIGN KEY(label_id) REFERENCES labels(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX idx_email_labels_email_id ON email_labels(email_id);
+            CREATE INDEX idx_email_labels_label_id ON email_labels(label_id);
+
+            CREATE TABLE rules (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                match_all INTEGER NOT NULL DEFAULT 1,
+                conditions TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                action_params TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        `),
+	},
 ];

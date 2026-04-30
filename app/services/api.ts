@@ -160,6 +160,30 @@ const api = {
 	// Search
 	searchEmails: (mailboxId: string, params: Record<string, string>) =>
 		get<EmailListResponse | Email[]>(`/api/v1/mailboxes/${mailboxId}/search`, { params }),
+
+	// Labels
+	listLabels: (mailboxId: string) =>
+		get<Array<{ id: string; name: string; color: string }>>(`/api/v1/mailboxes/${mailboxId}/labels`),
+	createLabel: (mailboxId: string, name: string, color?: string) =>
+		post<{ id: string; name: string; color: string }>(`/api/v1/mailboxes/${mailboxId}/labels`, { name, color }),
+	deleteLabel: (mailboxId: string, id: string) =>
+		del<void>(`/api/v1/mailboxes/${mailboxId}/labels/${id}`),
+
+	// Email Labels
+	addEmailLabel: (mailboxId: string, emailId: string, label_id: string) =>
+		post<void>(`/api/v1/mailboxes/${mailboxId}/emails/${emailId}/labels`, { label_id }),
+	removeEmailLabel: (mailboxId: string, emailId: string, labelId: string) =>
+		del<void>(`/api/v1/mailboxes/${mailboxId}/emails/${emailId}/labels/${labelId}`),
+
+	// Rules
+	listRules: (mailboxId: string) =>
+		get<import("~/types").Rule[]>(`/api/v1/mailboxes/${mailboxId}/rules`),
+	createRule: (mailboxId: string, rule: { name: string; enabled?: boolean; match_all?: boolean; conditions: Array<{ field: string; operator: string; value: string }>; action_type: string; action_params: Record<string, unknown> }) =>
+		post<import("~/types").Rule>(`/api/v1/mailboxes/${mailboxId}/rules`, rule),
+	updateRule: (mailboxId: string, id: string, rule: Partial<{ name: string; enabled: boolean; match_all: boolean; conditions: Array<{ field: string; operator: string; value: string }>; action_type: string; action_params: Record<string, unknown> }>) =>
+		put<import("~/types").Rule>(`/api/v1/mailboxes/${mailboxId}/rules/${id}`, rule),
+	deleteRule: (mailboxId: string, id: string) =>
+		del<void>(`/api/v1/mailboxes/${mailboxId}/rules/${id}`),
 };
 
 export default api;

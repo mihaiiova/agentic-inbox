@@ -42,3 +42,30 @@ export const attachments = sqliteTable("attachments", {
 	content_id: text("content_id"),
 	disposition: text("disposition"),
 });
+
+export const labels = sqliteTable("labels", {
+	id: text("id").primaryKey(),
+	name: text("name").notNull(),
+	color: text("color").notNull().default("primary"),
+	created_at: text("created_at").notNull().default("datetime('now')"),
+});
+
+export const emailLabels = sqliteTable("email_labels", {
+	email_id: text("email_id")
+		.notNull()
+		.references(() => emails.id, { onDelete: "cascade" }),
+	label_id: text("label_id")
+		.notNull()
+		.references(() => labels.id, { onDelete: "cascade" }),
+});
+
+export const rules = sqliteTable("rules", {
+	id: text("id").primaryKey(),
+	name: text("name").notNull(),
+	enabled: integer("enabled").notNull().default(1),
+	match_all: integer("match_all").notNull().default(1),
+	conditions: text("conditions").notNull(),
+	action_type: text("action_type").notNull(),
+	action_params: text("action_params").notNull(),
+	created_at: text("created_at").notNull().default("datetime('now')"),
+});

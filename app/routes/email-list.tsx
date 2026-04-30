@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Button, Pagination, Tooltip } from "@cloudflare/kumo";
+import { Badge, Button, Pagination, Tooltip } from "@cloudflare/kumo";
 import {
 	ArchiveIcon,
 	ArrowBendUpLeftIcon,
@@ -388,18 +388,27 @@ export default function EmailListRoute() {
 													{formatListDate(email.date)}
 												</span>
 											</div>
-											<div className="truncate text-sm mt-0.5">
-												<span
-													className={hasUnread(email) ? "font-medium text-kumo-default" : "text-kumo-subtle"}
-												>
-													{email.subject}
-												</span>
-											{snippet && (
-												<span className="text-kumo-subtle font-normal">
-													{" "}&mdash; {snippet}
-												</span>
-											)}
-										</div>
+										<div className="truncate text-sm mt-0.5">
+											<span
+												className={hasUnread(email) ? "font-medium text-kumo-default" : "text-kumo-subtle"}
+											>
+												{email.subject}
+											</span>
+										{snippet && (
+											<span className="text-kumo-subtle font-normal">
+												{" "}&mdash; {snippet}
+											</span>
+										)}
+										{email.labels && email.labels.length > 0 && (
+											<span className="ml-1.5 inline-flex gap-1">
+													{email.labels.map((label) => (
+														<Badge key={label.id} variant={label.color as any}>
+															{label.name}
+														</Badge>
+													))}
+											</span>
+										)}
+									</div>
 									</div>
 
 										{/* Hover actions */}

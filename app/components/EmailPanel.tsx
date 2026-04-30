@@ -179,6 +179,7 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
 				subject={email.subject}
 				messageCount={allMessages.length}
 				showThreadCount={hasThread}
+				labels={email.labels}
 			/>
 
 			<div className="flex-1 overflow-y-auto">

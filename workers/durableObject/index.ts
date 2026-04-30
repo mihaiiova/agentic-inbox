@@ -99,6 +99,50 @@ interface AttachmentData {
 	disposition?: string | null;
 }
 
+interface RuleCondition {
+	field: "from" | "to" | "cc" | "subject" | "body";
+	operator: "contains" | "equals" | "starts_with" | "ends_with" | "matches";
+	value: string;
+}
+
+function getFieldValue(email: EmailData, field: RuleCondition["field"]): string {
+	switch (field) {
+		case "from": return email.sender || "";
+		case "to": return email.recipient || "";
+		case "cc": return email.cc || "";
+		case "subject": return email.subject || "";
+		case "body": return email.body || "";
+		default: return "";
+	}
+}
+
+function matchesCondition(email: EmailData, condition: RuleCondition): boolean {
+	const fieldValue = getFieldValue(email, condition.field);
+	if (!fieldValue) return false;
+
+	const haystack = fieldValue.toLowerCase();
+	const needle = condition.value.toLowerCase();
+
+	switch (condition.operator) {
+		case "contains":
+			return haystack.includes(needle);
+		case "equals":
+			return haystack === needle;
+		case "starts_with":
+			return haystack.startsWith(needle);
+		case "ends_with":
+			return haystack.endsWith(needle);
+		case "matches":
+			try {
+				return new RegExp(condition.value, "i").test(fieldValue);
+			} catch {
+				return false;
+			}
+		default:
+			return false;
+	}
+}
+
 export class MailboxDO extends DurableObject<Env> {
 	declare __DURABLE_OBJECT_BRAND: never;
 	db: ReturnType<typeof drizzle>;
@@ -451,11 +495,23 @@ export class MailboxDO extends DurableObject<Env> {
 			.where(eq(schema.attachments.email_id, id))
 			.all();
 
+		const emailLabels = this.db
+			.select({
+				id: schema.labels.id,
+				name: schema.labels.name,
+				color: schema.labels.color,
+			})
+			.from(schema.emailLabels)
+			.innerJoin(schema.labels, eq(schema.emailLabels.label_id, schema.labels.id))
+			.where(eq(schema.emailLabels.email_id, id))
+			.all();
+
 		return {
 			...email,
 			read: !!email.read,
 			starred: !!email.starred,
 			attachments: emailAttachments,
+			labels: emailLabels,
 		};
 	}
 
@@ -475,9 +531,9 @@ export class MailboxDO extends DurableObject<Env> {
 		if (emailRows.length === 0) return [];
 
 		const emailIds = emailRows.map((e) => e.id as string);
+		const placeholders = emailIds.map((_, i) => `?${i + 1}`).join(",");
 
 		// Batch-fetch all attachments for the thread in a single query
-		const placeholders = emailIds.map((_, i) => `?${i + 1}`).join(",");
 		const attachmentRows = [
 			...this.ctx.storage.sql.exec(
 				`SELECT * FROM attachments WHERE email_id IN (${placeholders})`,
@@ -493,11 +549,28 @@ export class MailboxDO extends DurableObject<Env> {
 			attachmentsByEmail.set(att.email_id, list);
 		}
 
+		// Batch-fetch all labels for the thread in a single query
+		const labelRows = [
+			...this.ctx.storage.sql.exec(
+				`SELECT el.email_id, l.id, l.name, l.color FROM email_labels el JOIN labels l ON el.label_id = l.id WHERE el.email_id IN (${placeholders})`,
+				...emailIds,
+			),
+		] as any[];
+
+		// Group labels by email_id
+		const labelsByEmail = new Map<string, any[]>();
+		for (const lbl of labelRows) {
+			const list = labelsByEmail.get(lbl.email_id) || [];
+			list.push({ id: lbl.id, name: lbl.name, color: lbl.color });
+			labelsByEmail.set(lbl.email_id, list);
+		}
+
 		return emailRows.map((email) => ({
 			...email,
 			read: !!email.read,
 			starred: !!email.starred,
 			attachments: attachmentsByEmail.get(email.id) || [],
+			labels: labelsByEmail.get(email.id) || [],
 		}));
 	}
 
@@ -816,6 +889,165 @@ export class MailboxDO extends DurableObject<Env> {
 		return null;
 	}
 
+	// ── Labels (Drizzle) ────────────────────────────────────────────
+
+	async getLabels() {
+		return this.db.select().from(schema.labels).all();
+	}
+
+	async createLabel(id: string, name: string, color: string) {
+		try {
+			this.db.insert(schema.labels).values({ id, name, color }).run();
+			return { id, name, color };
+		} catch (e: unknown) {
+			if (e instanceof Error && e.message.includes("UNIQUE constraint failed")) {
+				return null;
+			}
+			throw e;
+		}
+	}
+
+	async deleteLabel(id: string) {
+		this.db.delete(schema.labels).where(eq(schema.labels.id, id)).run();
+		return true;
+	}
+
+	async getEmailLabelsBatch(emailIds: string[]) {
+		if (emailIds.length === 0) return [];
+		const placeholders = emailIds.map((_, i) => `?${i + 1}`).join(",");
+		return [
+			...this.ctx.storage.sql.exec(
+				`SELECT el.email_id, l.id, l.name, l.color FROM email_labels el JOIN labels l ON el.label_id = l.id WHERE el.email_id IN (${placeholders})`,
+				...emailIds,
+			),
+		] as any[];
+	}
+
+	async enrichEmailsWithLabels(emails: any[]) {
+		if (emails.length === 0) return emails;
+		const emailIds = emails.map((e) => e.id as string);
+		const labelRows = await this.getEmailLabelsBatch(emailIds);
+		const labelsByEmail = new Map<string, any[]>();
+		for (const row of labelRows) {
+			const list = labelsByEmail.get(row.email_id) || [];
+			list.push({ id: row.id, name: row.name, color: row.color });
+			labelsByEmail.set(row.email_id, list);
+		}
+		return emails.map((e) => ({ ...e, labels: labelsByEmail.get(e.id) || [] }));
+	}
+
+	async addEmailLabel(emailId: string, labelId: string) {
+		try {
+			this.db.insert(schema.emailLabels).values({ email_id: emailId, label_id: labelId }).run();
+		} catch {
+			// ignore duplicate
+		}
+	}
+
+	async removeEmailLabel(emailId: string, labelId: string) {
+		this.db.delete(schema.emailLabels)
+			.where(and(eq(schema.emailLabels.email_id, emailId), eq(schema.emailLabels.label_id, labelId)))
+			.run();
+	}
+
+	// ── Rules (Drizzle + raw SQL) ───────────────────────────────────
+
+	async getRules() {
+		return this.db.select().from(schema.rules).all();
+	}
+
+	async createRule(rule: {
+		id: string;
+		name: string;
+		enabled?: number;
+		match_all?: number;
+		conditions: string;
+		action_type: string;
+		action_params: string;
+	}) {
+		this.db.insert(schema.rules).values({
+			id: rule.id,
+			name: rule.name,
+			enabled: rule.enabled ?? 1,
+			match_all: rule.match_all ?? 1,
+			conditions: rule.conditions,
+			action_type: rule.action_type,
+			action_params: rule.action_params,
+		}).run();
+		return rule;
+	}
+
+	async updateRule(
+		id: string,
+		updates: {
+			name?: string;
+			enabled?: number;
+			match_all?: number;
+			conditions?: string;
+			action_type?: string;
+			action_params?: string;
+		},
+	) {
+		this.db.update(schema.rules).set(updates).where(eq(schema.rules.id, id)).run();
+		return this.db.select().from(schema.rules).where(eq(schema.rules.id, id)).get();
+	}
+
+	async deleteRule(id: string) {
+		this.db.delete(schema.rules).where(eq(schema.rules.id, id)).run();
+		return true;
+	}
+
+	// ── Rule Engine ────────────────────────────────────────────────
+
+	async applyRules(email: EmailData) {
+		const rules = await this.getRules();
+		for (const rule of rules) {
+			if (!rule.enabled) continue;
+			try {
+				const conditions = JSON.parse(rule.conditions) as RuleCondition[];
+				const actionParams = JSON.parse(rule.action_params) as Record<string, unknown>;
+				const matches = this.#evaluateRule(email, conditions, !!rule.match_all);
+				if (matches) {
+					await this.#executeRuleAction(email.id, rule.action_type, actionParams);
+				}
+			} catch (e) {
+				console.warn(`Rule ${rule.id} failed:`, (e as Error).message);
+			}
+		}
+	}
+
+	#evaluateRule(
+		email: EmailData,
+		conditions: RuleCondition[],
+		matchAll: boolean,
+	): boolean {
+		if (conditions.length === 0) return true;
+		const results = conditions.map((c) => matchesCondition(email, c));
+		return matchAll ? results.every(Boolean) : results.some(Boolean);
+	}
+
+	async #executeRuleAction(
+		emailId: string,
+		actionType: string,
+		params: Record<string, unknown>,
+	) {
+		switch (actionType) {
+			case "add_label": {
+				const labelId = params.label_id as string;
+				if (labelId) {
+					try {
+						this.db.insert(schema.emailLabels).values({ email_id: emailId, label_id: labelId }).run();
+					} catch {
+						// Unique constraint violation = label already applied, ignore
+					}
+				}
+				break;
+			}
+			default:
+				console.warn(`Unknown rule action type: ${actionType}`);
+			}
+	}
+
 	// ── Email creation (Drizzle) ───────────────────────────────────
 
 	async createEmail(
@@ -867,6 +1099,11 @@ export class MailboxDO extends DurableObject<Env> {
 
 		if (attachments.length > 0) {
 			this.db.insert(schema.attachments).values(attachments).run();
+		}
+
+		// Apply rules to incoming emails (only for inbox — sent/draft emails are user-created)
+		if (folderId === Folders.INBOX) {
+			this.ctx.waitUntil(this.applyRules(email));
 		}
 	}
 }
