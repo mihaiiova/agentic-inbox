@@ -531,7 +531,7 @@ export default function SettingsRoute() {
 
 			{/* Rule Dialog */}
 			<Dialog.Root open={isRuleDialogOpen} onOpenChange={setIsRuleDialogOpen}>
-				<Dialog size="md" className="p-6 max-h-[90vh] overflow-y-auto">
+				<Dialog size="lg" className="p-6 max-h-[90vh] overflow-y-auto">
 					<Dialog.Title className="text-base font-semibold mb-4">
 						{editingRuleId ? "Edit Rule" : "New Rule"}
 					</Dialog.Title>
