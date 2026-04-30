@@ -308,7 +308,7 @@ export default function SettingsRoute() {
 						</div>
 						<Button
 							variant="ghost"
-							size="xs"
+							size="sm"
 							icon={<PlusIcon size={14} />}
 							onClick={() => setIsLabelDialogOpen(true)}
 						>
@@ -348,7 +348,7 @@ export default function SettingsRoute() {
 						</div>
 						<Button
 							variant="ghost"
-							size="xs"
+							size="sm"
 							icon={<PlusIcon size={14} />}
 							onClick={() => {
 								resetRuleForm();
@@ -464,7 +464,7 @@ export default function SettingsRoute() {
 						{isCustomPrompt && (
 							<Button
 								variant="ghost"
-								size="xs"
+								size="sm"
 								icon={<ArrowCounterClockwiseIcon size={14} />}
 								onClick={handleResetPrompt}
 							>
@@ -617,7 +617,7 @@ export default function SettingsRoute() {
 							</div>
 							<Button
 								variant="ghost"
-								size="xs"
+								size="sm"
 								icon={<PlusIcon size={14} />}
 								onClick={addCondition}
 								className="mt-2"

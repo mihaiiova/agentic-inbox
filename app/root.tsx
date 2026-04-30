@@ -141,7 +141,7 @@ export function ErrorBoundary({ error }: { error: unknown }) {
 			title = `Error ${error.status}`;
 			description = error.statusText || description;
 		}
-	} else if (error instanceof Error && import.meta.env.DEV) {
+	} else if (error instanceof Error) {
 		description = error.message;
 	}
 
