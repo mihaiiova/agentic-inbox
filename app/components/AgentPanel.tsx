@@ -62,6 +62,26 @@ const TOOL_LABELS: Record<string, { label: string; icon: React.ReactNode }> = {
 		label: "Moving email",
 		icon: <EnvelopeSimpleIcon size={14} weight="bold" />,
 	},
+	create_static_rule: {
+		label: "Creating rule",
+		icon: <WrenchIcon size={14} weight="bold" />,
+	},
+	create_agent_rule: {
+		label: "Creating smart rule",
+		icon: <WrenchIcon size={14} weight="bold" />,
+	},
+	list_rules: {
+		label: "Listing rules",
+		icon: <WrenchIcon size={14} weight="bold" />,
+	},
+	delete_rule: {
+		label: "Deleting rule",
+		icon: <TrashIcon size={14} weight="bold" />,
+	},
+	classify_email: {
+		label: "Classifying email",
+		icon: <WrenchIcon size={14} weight="bold" />,
+	},
 };
 
 function ToolCallBadge({

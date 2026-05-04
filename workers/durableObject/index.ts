@@ -10,6 +10,8 @@ import * as schema from "../db/schema";
 import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
 import { applyMigrations, mailboxMigrations } from "./migrations";
+import { sendPushoverNotification, getMailboxPushoverKey } from "../lib/notifications";
+import { classifyEmail } from "../lib/classification";
 
 /**
  * SQL expression to normalize email subjects by stripping common
@@ -101,7 +103,7 @@ interface AttachmentData {
 
 interface RuleCondition {
 	field: "from" | "to" | "cc" | "subject" | "body";
-	operator: "contains" | "equals" | "starts_with" | "ends_with" | "matches";
+	operator: "contains" | "equals" | "starts_with" | "ends_with" | "matches" | "classification";
 	value: string;
 }
 
@@ -116,7 +118,7 @@ function getFieldValue(email: EmailData, field: RuleCondition["field"]): string 
 	}
 }
 
-function matchesCondition(email: EmailData, condition: RuleCondition): boolean {
+function matchesStringCondition(email: EmailData, condition: RuleCondition): boolean {
 	const fieldValue = getFieldValue(email, condition.field);
 	if (!fieldValue) return false;
 
@@ -643,6 +645,103 @@ export class MailboxDO extends DurableObject<Env> {
 		);
 	}
 
+	// ── Drive files ────────────────────────────────────────────────
+
+	async createDriveFile(
+		emailId: string,
+		attachment: {
+			id: string;
+			email_id: string;
+			filename: string;
+			mimetype: string;
+			size: number;
+			content_id?: string | null;
+			disposition?: string | null;
+		},
+		r2Key: string,
+	) {
+		const driveFileId = crypto.randomUUID();
+		this.ctx.storage.sql.exec(
+			`INSERT INTO drive_files (id, email_id, filename, mimetype, size, r2_key)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+			driveFileId,
+			emailId,
+			attachment.filename,
+			attachment.mimetype,
+			attachment.size,
+			r2Key,
+		);
+		return {
+			id: driveFileId,
+			email_id: emailId,
+			filename: attachment.filename,
+			mimetype: attachment.mimetype,
+			size: attachment.size,
+			r2_key: r2Key,
+			created_at: new Date().toISOString(),
+		};
+	}
+
+	async getDriveFile(id: string) {
+		const rows = [
+			...this.ctx.storage.sql.exec(
+				`SELECT id, email_id, filename, mimetype, size, r2_key, created_at
+				 FROM drive_files WHERE id = ?1`,
+				id,
+			),
+		] as any[];
+		if (rows.length === 0) return null;
+		const row = rows[0];
+		return {
+			id: row.id,
+			email_id: row.email_id ?? null,
+			filename: row.filename,
+			mimetype: row.mimetype,
+			size: row.size,
+			r2_key: row.r2_key,
+			created_at: row.created_at,
+		};
+	}
+
+	async deleteDriveFile(id: string) {
+		this.ctx.storage.sql.exec(`DELETE FROM drive_files WHERE id = ?1`, id);
+		return true;
+	}
+
+	async listDriveFiles(page = 1, limit = 25) {
+		const safeLimit = Math.min(Math.max(limit, 1), 100);
+		const offset = (page - 1) * safeLimit;
+
+		const files = [
+			...this.ctx.storage.sql.exec(
+				`SELECT id, email_id, filename, mimetype, size, created_at
+				 FROM drive_files
+				 ORDER BY created_at DESC
+				 LIMIT ?1 OFFSET ?2`,
+				safeLimit,
+				offset,
+			),
+		] as any[];
+
+		const countRow = [
+			...this.ctx.storage.sql.exec(
+				`SELECT COUNT(*) as total FROM drive_files`,
+			),
+		][0] as { total: number } | undefined;
+
+		return {
+			files: files.map((f) => ({
+				id: f.id,
+				email_id: f.email_id ?? null,
+				filename: f.filename,
+				mimetype: f.mimetype,
+				size: f.size,
+				created_at: f.created_at,
+			})),
+			totalCount: countRow?.total ?? 0,
+		};
+	}
+
 	// ── Folders (Drizzle) ──────────────────────────────────────────
 
 	async getFolders() {
@@ -959,18 +1058,22 @@ export class MailboxDO extends DurableObject<Env> {
 	async createRule(rule: {
 		id: string;
 		name: string;
+		type?: string;
 		enabled?: number;
 		match_all?: number;
 		conditions: string;
+		agent_prompt?: string | null;
 		action_type: string;
 		action_params: string;
 	}) {
 		this.db.insert(schema.rules).values({
 			id: rule.id,
 			name: rule.name,
+			type: rule.type ?? "static",
 			enabled: rule.enabled ?? 1,
 			match_all: rule.match_all ?? 1,
 			conditions: rule.conditions,
+			agent_prompt: rule.agent_prompt ?? null,
 			action_type: rule.action_type,
 			action_params: rule.action_params,
 		}).run();
@@ -981,9 +1084,11 @@ export class MailboxDO extends DurableObject<Env> {
 		id: string,
 		updates: {
 			name?: string;
+			type?: string;
 			enabled?: number;
 			match_all?: number;
 			conditions?: string;
+			agent_prompt?: string | null;
 			action_type?: string;
 			action_params?: string;
 		},
@@ -1003,31 +1108,177 @@ export class MailboxDO extends DurableObject<Env> {
 		const rules = await this.getRules();
 		for (const rule of rules) {
 			if (!rule.enabled) continue;
+			if (rule.type === "agent") continue; // Agent rules are evaluated separately
 			try {
 				const conditions = JSON.parse(rule.conditions) as RuleCondition[];
 				const actionParams = JSON.parse(rule.action_params) as Record<string, unknown>;
-				const matches = this.#evaluateRule(email, conditions, !!rule.match_all);
-				if (matches) {
-					await this.#executeRuleAction(email.id, rule.action_type, actionParams);
+				const { matched, conditionResults } = await this.#evaluateStaticRule(email, conditions, !!rule.match_all);
+				if (matched) {
+					await this.#executeRuleAction(email, rule.action_type, actionParams);
 				}
+				await this.#logRuleExecution({
+					email_id: email.id,
+					rule_id: rule.id,
+					rule_type: "static",
+					action_type: rule.action_type,
+					status: matched ? "matched" : "not_matched",
+					details: JSON.stringify({
+						match_all: rule.match_all,
+						conditionResults,
+					}),
+				});
 			} catch (e) {
 				console.warn(`Rule ${rule.id} failed:`, (e as Error).message);
+				await this.#logRuleExecution({
+					email_id: email.id,
+					rule_id: rule.id,
+					rule_type: "static",
+					action_type: rule.action_type,
+					status: "failed",
+					details: JSON.stringify({ error: (e as Error).message }),
+				});
+			}
+		}
+		// Evaluate agent rules in a single batch
+		const agentRules = rules.filter((r) => r.enabled && r.type === "agent" && r.agent_prompt);
+		if (agentRules.length > 0) {
+			try {
+				const { classifyEmailBatch } = await import("../lib/classification");
+				const prompts = agentRules.map((r) => ({ ruleId: r.id, prompt: r.agent_prompt! }));
+				const matchedIds = await classifyEmailBatch(this.env, email, prompts);
+				for (const rule of agentRules) {
+					const matched = matchedIds.includes(rule.id);
+					const actionParams = JSON.parse(rule.action_params) as Record<string, unknown>;
+					if (matched) {
+						await this.#executeRuleAction(email, rule.action_type, actionParams);
+					}
+					await this.#logRuleExecution({
+						email_id: email.id,
+						rule_id: rule.id,
+						rule_type: "agent",
+						action_type: rule.action_type,
+						status: matched ? "matched" : "not_matched",
+						details: JSON.stringify({
+							agent_prompt: rule.agent_prompt,
+							matched,
+						}),
+					});
+				}
+			} catch (e) {
+				console.warn("Agent rule batch evaluation failed:", (e as Error).message);
+				for (const rule of agentRules) {
+					await this.#logRuleExecution({
+						email_id: email.id,
+						rule_id: rule.id,
+						rule_type: "agent",
+						action_type: rule.action_type,
+						status: "failed",
+						details: JSON.stringify({
+							error: (e as Error).message,
+							agent_prompt: rule.agent_prompt,
+						}),
+					});
+				}
 			}
 		}
 	}
 
-	#evaluateRule(
+	async #evaluateStaticRule(
 		email: EmailData,
 		conditions: RuleCondition[],
 		matchAll: boolean,
-	): boolean {
-		if (conditions.length === 0) return true;
-		const results = conditions.map((c) => matchesCondition(email, c));
-		return matchAll ? results.every(Boolean) : results.some(Boolean);
+	): Promise<{ matched: boolean; conditionResults: Array<{ field?: string; operator: string; value: string; result: boolean }> }> {
+		if (conditions.length === 0) return { matched: true, conditionResults: [] };
+
+		const conditionResults: Array<{ field?: string; operator: string; value: string; result: boolean }> = [];
+
+		// Split into cheap string conditions and expensive classification conditions
+		const stringConditions = conditions.filter((c) => c.operator !== "classification");
+		const classificationConditions = conditions.filter((c) => c.operator === "classification");
+
+		// Evaluate string conditions first
+		for (const condition of stringConditions) {
+			const result = matchesStringCondition(email, condition);
+			conditionResults.push({
+				field: condition.field,
+				operator: condition.operator,
+				value: condition.value,
+				result,
+			});
+		}
+
+		// Short-circuit optimizations
+		if (matchAll) {
+			// AND logic: if any string condition fails, the whole rule fails
+			if (conditionResults.some((r) => !r.result)) {
+				return { matched: false, conditionResults };
+			}
+			// All string conditions passed — now evaluate classification conditions
+		} else {
+			// OR logic: if any string condition passes, the whole rule passes
+			if (conditionResults.some((r) => r.result)) {
+				return { matched: true, conditionResults };
+			}
+			// No string condition passed — need classification conditions to save the rule
+		}
+
+		// Evaluate classification conditions with a per-rule cache
+		const classificationCache = new Map<string, boolean>();
+		for (const condition of classificationConditions) {
+			const prompt = condition.value;
+			let result = classificationCache.get(prompt);
+			if (result === undefined) {
+				result = await classifyEmail(this.env, email, prompt);
+				classificationCache.set(prompt, result);
+			}
+			conditionResults.push({
+				operator: "classification",
+				value: prompt,
+				result,
+			});
+			if (matchAll) {
+				if (!result) return { matched: false, conditionResults }; // AND: one classification failed
+			} else {
+				if (result) return { matched: true, conditionResults }; // OR: one classification passed
+			}
+		}
+
+		// If we get here:
+		// - matchAll: all string conditions passed, all classification conditions passed
+		// - matchAny: no string condition passed, no classification condition passed
+		return { matched: matchAll, conditionResults };
+	}
+
+	async #logRuleExecution(entry: {
+		email_id: string;
+		rule_id: string;
+		rule_type: string;
+		action_type: string;
+		status: string;
+		details: string;
+	}) {
+		try {
+			this.db.insert(schema.ruleLogs).values({
+				id: crypto.randomUUID(),
+				...entry,
+			}).run();
+		} catch (e) {
+			console.warn("Failed to write rule log:", (e as Error).message);
+		}
+	}
+
+	async getRuleLogs(limit = 50, offset = 0) {
+		return this.db
+			.select()
+			.from(schema.ruleLogs)
+			.orderBy(desc(schema.ruleLogs.created_at))
+			.limit(limit)
+			.offset(offset)
+			.all();
 	}
 
 	async #executeRuleAction(
-		emailId: string,
+		email: EmailData,
 		actionType: string,
 		params: Record<string, unknown>,
 	) {
@@ -1036,10 +1287,75 @@ export class MailboxDO extends DurableObject<Env> {
 				const labelId = params.label_id as string;
 				if (labelId) {
 					try {
-						this.db.insert(schema.emailLabels).values({ email_id: emailId, label_id: labelId }).run();
+						this.db.insert(schema.emailLabels).values({ email_id: email.id, label_id: labelId }).run();
 					} catch {
 						// Unique constraint violation = label already applied, ignore
 					}
+				}
+				break;
+			}
+			case "save_attachment": {
+				const attachments = this.db
+					.select()
+					.from(schema.attachments)
+					.where(eq(schema.attachments.email_id, email.id))
+					.all();
+				if (attachments.length === 0) break;
+
+				for (const att of attachments) {
+					try {
+						const sourceKey = `attachments/${email.id}/${att.id}/${att.filename}`;
+						const obj = await this.env.BUCKET.get(sourceKey);
+						if (!obj) continue;
+
+						// Stream the body into a Uint8Array
+						const chunks: Uint8Array[] = [];
+						const reader = obj.body.getReader();
+						while (true) {
+							const { done, value } = await reader.read();
+							if (done) break;
+							chunks.push(value);
+						}
+						const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+						const blob = new Uint8Array(totalLength);
+						let offset = 0;
+						for (const chunk of chunks) {
+							blob.set(chunk, offset);
+							offset += chunk.length;
+						}
+
+						const driveFileId = crypto.randomUUID();
+						const driveKey = `drive/${driveFileId}/${att.filename}`;
+						await this.env.BUCKET.put(driveKey, blob);
+						await this.createDriveFile(email.id, att, driveKey);
+					} catch (e) {
+						console.warn(`Failed to save attachment ${att.id} to drive:`, (e as Error).message);
+					}
+				}
+				break;
+			}
+			case "send_notification": {
+				try {
+					const userKey = (params.pushover_user_key as string) || await getMailboxPushoverKey(this.env, email.recipient);
+					if (!userKey) {
+						console.warn("Skipping notification: no Pushover user key configured");
+						break;
+					}
+					const result = await sendPushoverNotification(
+						this.env,
+						userKey,
+						{ subject: email.subject || "(no subject)", sender: email.sender || "Unknown" },
+						{
+							title: params.title as string | undefined,
+							message: params.message as string | undefined,
+							priority: params.priority as number | undefined,
+						},
+					);
+					if (!result.success) {
+						console.warn("Pushover notification failed:", result.error);
+					}
+				} catch (e) {
+					console.warn("Failed to send notification:", (e as Error).message);
 				}
 				break;
 			}

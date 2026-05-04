@@ -3,13 +3,31 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { Badge, Button, Dialog, Input, Loader, Select, useKumoToastManager } from "@cloudflare/kumo";
-import { RobotIcon, ArrowCounterClockwiseIcon, PlusIcon, TagIcon, TrashIcon, FadersIcon, PencilSimpleIcon, XIcon } from "@phosphor-icons/react";
+import { RobotIcon, ArrowCounterClockwiseIcon, PlusIcon, TagIcon, TrashIcon, FadersIcon, PencilSimpleIcon, XIcon, BellIcon, ScrollIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { useMailbox, useUpdateMailbox } from "~/queries/mailboxes";
 import { useLabels, useCreateLabel, useDeleteLabel } from "~/queries/labels";
-import { useRules, useCreateRule, useUpdateRule, useDeleteRule } from "~/queries/rules";
-import type { RuleCondition } from "~/types";
+import { useRules, useCreateRule, useUpdateRule, useDeleteRule, useRuleLogs } from "~/queries/rules";
+import type { RuleCondition, RuleLog } from "~/types";
+
+export function getRuleActionText(
+	actionType: string,
+	params: Record<string, unknown>,
+	labels: Array<{ id: string; name: string }>,
+): string {
+	if (actionType === "add_label") {
+		const label = labels.find((l) => l.id === params.label_id);
+		return label ? `Add label "${label.name}"` : "Add label (deleted)";
+	}
+	if (actionType === "save_attachment") {
+		return "Save attachments to Drive";
+	}
+	if (actionType === "send_notification") {
+		return "Send Pushover notification";
+	}
+	return actionType;
+}
 
 // Placeholder shown in the textarea when no custom prompt is set.
 const PROMPT_PLACEHOLDER = `You are an email assistant that helps manage this inbox. You read emails, draft replies, and help organize conversations.\n\nWrite like a real person. Short, direct, flowing prose. Plain text only.\n\n(Leave empty to use the full built-in default prompt)`;
@@ -38,6 +56,7 @@ const CONDITION_OPERATORS = [
 	{ value: "starts_with", label: "Starts with" },
 	{ value: "ends_with", label: "Ends with" },
 	{ value: "matches", label: "Matches regex" },
+	{ value: "classification", label: "AI Classification" },
 ] as const;
 
 function LabelColorPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -53,6 +72,111 @@ function LabelColorPicker({ value, onChange }: { value: string; onChange: (v: st
 					<Badge variant={v.value as any}>{v.label}</Badge>
 				</button>
 			))}
+		</div>
+	);
+}
+
+function StatusBadge({ status }: { status: string }) {
+	const variants: Record<string, { variant: "primary" | "secondary" | "success" | "warning" | "destructive" | "info" | "beta"; label: string }> = {
+		matched: { variant: "info", label: "Matched" },
+		not_matched: { variant: "secondary", label: "No match" },
+		success: { variant: "success", label: "Success" },
+		failed: { variant: "destructive", label: "Failed" },
+	};
+	const config = variants[status] || { variant: "secondary", label: status };
+	return <Badge variant={config.variant as any}>{config.label}</Badge>;
+}
+
+function RuleLogsSection({ mailboxId }: { mailboxId: string | undefined }) {
+	const [page, setPage] = useState(1);
+	const [expandedId, setExpandedId] = useState<string | null>(null);
+	const limit = 50;
+	const { data: logs = [], isLoading } = useRuleLogs(mailboxId, page, limit);
+
+	if (isLoading) {
+		return <Loader size="sm" />;
+	}
+
+	if (logs.length === 0) {
+		return <p className="text-xs text-kumo-subtle">No rule executions yet. Logs appear when rules are evaluated against incoming emails.</p>;
+	}
+
+	return (
+		<div className="space-y-2">
+			<div className="overflow-x-auto">
+				<table className="w-full text-xs">
+					<thead>
+						<tr className="border-b border-kumo-line text-kumo-subtle">
+							<th className="text-left py-1.5 px-2 font-medium">Time</th>
+							<th className="text-left py-1.5 px-2 font-medium">Rule</th>
+							<th className="text-left py-1.5 px-2 font-medium">Type</th>
+							<th className="text-left py-1.5 px-2 font-medium">Action</th>
+							<th className="text-left py-1.5 px-2 font-medium">Status</th>
+						</tr>
+					</thead>
+					<tbody>
+						{logs.map((log: RuleLog) => (
+							<>
+								<tr
+									key={log.id}
+									className="border-b border-kumo-line/50 cursor-pointer hover:bg-kumo-fill/30"
+									onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
+								>
+									<td className="py-1.5 px-2 text-kumo-subtle whitespace-nowrap">
+										{new Date(log.created_at).toLocaleString()}
+									</td>
+									<td className="py-1.5 px-2 text-kumo-default">
+										{log.rule_id ? log.rule_id.slice(0, 8) : "—"}
+									</td>
+									<td className="py-1.5 px-2">
+										<Badge variant={log.rule_type === "agent" ? "beta" : "secondary"}>
+											{log.rule_type === "agent" ? "Agent" : "Static"}
+										</Badge>
+									</td>
+									<td className="py-1.5 px-2 text-kumo-default">{log.action_type}</td>
+									<td className="py-1.5 px-2">
+										<StatusBadge status={log.status} />
+									</td>
+								</tr>
+								{expandedId === log.id && (
+									<tr>
+										<td colSpan={5} className="py-2 px-2 bg-kumo-recessed">
+											<pre className="text-[11px] text-kumo-subtle whitespace-pre-wrap break-all">
+												{(() => {
+													try {
+														return JSON.stringify(JSON.parse(log.details), null, 2);
+													} catch {
+														return log.details;
+													}
+												})()}
+											</pre>
+										</td>
+									</tr>
+								)}
+							</>
+						))}
+					</tbody>
+				</table>
+			</div>
+			<div className="flex items-center justify-between pt-2">
+				<Button
+					variant="ghost"
+					size="sm"
+					disabled={page <= 1}
+					onClick={() => setPage((p) => Math.max(1, p - 1))}
+				>
+					Previous
+				</Button>
+				<span className="text-xs text-kumo-subtle">Page {page}</span>
+				<Button
+					variant="ghost"
+					size="sm"
+					disabled={logs.length < limit}
+					onClick={() => setPage((p) => p + 1)}
+				>
+					Next
+				</Button>
+			</div>
 		</div>
 	);
 }
@@ -74,6 +198,7 @@ export default function SettingsRoute() {
 
 	const [displayName, setDisplayName] = useState("");
 	const [agentPrompt, setAgentPrompt] = useState("");
+	const [pushoverUserKey, setPushoverUserKey] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
 
 	// Label form state
@@ -86,19 +211,24 @@ export default function SettingsRoute() {
 	const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
 	const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
 	const [ruleName, setRuleName] = useState("");
+	const [ruleType, setRuleType] = useState<"static" | "agent">("static");
 	const [ruleEnabled, setRuleEnabled] = useState(true);
 	const [ruleMatchAll, setRuleMatchAll] = useState(true);
 	const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([
 		{ field: "from", operator: "contains", value: "" },
 	]);
+	const [ruleAgentPrompt, setRuleAgentPrompt] = useState("");
 	const [ruleActionType, setRuleActionType] = useState("add_label");
 	const [ruleActionLabelId, setRuleActionLabelId] = useState("");
+	const [ruleActionPushoverTitle, setRuleActionPushoverTitle] = useState("");
+	const [ruleActionPushoverMessage, setRuleActionPushoverMessage] = useState("");
 	const [isSavingRule, setIsSavingRule] = useState(false);
 
 	useEffect(() => {
 		if (mailbox) {
 			setDisplayName(mailbox.settings?.fromName || mailbox.name || "");
 			setAgentPrompt(mailbox.settings?.agentSystemPrompt || "");
+			setPushoverUserKey(mailbox.settings?.pushoverUserKey || "");
 		}
 	}, [mailbox]);
 
@@ -109,6 +239,7 @@ export default function SettingsRoute() {
 			...mailbox.settings,
 			fromName: displayName,
 			agentSystemPrompt: agentPrompt.trim() || undefined,
+			pushoverUserKey: pushoverUserKey.trim() || undefined,
 		};
 		try {
 			await updateMailboxMutation.mutateAsync({ mailboxId, settings });
@@ -162,16 +293,21 @@ export default function SettingsRoute() {
 	const resetRuleForm = () => {
 		setEditingRuleId(null);
 		setRuleName("");
+		setRuleType("static");
 		setRuleEnabled(true);
 		setRuleMatchAll(true);
 		setRuleConditions([{ field: "from", operator: "contains", value: "" }]);
+		setRuleAgentPrompt("");
 		setRuleActionType("add_label");
 		setRuleActionLabelId("");
+		setRuleActionPushoverTitle("");
+		setRuleActionPushoverMessage("");
 	};
 
 	const openEditRule = (rule: import("~/types").Rule) => {
 		setEditingRuleId(rule.id);
 		setRuleName(rule.name);
+		setRuleType(rule.type as "static" | "agent");
 		setRuleEnabled(!!rule.enabled);
 		setRuleMatchAll(!!rule.match_all);
 		try {
@@ -179,12 +315,17 @@ export default function SettingsRoute() {
 		} catch {
 			setRuleConditions([]);
 		}
+		setRuleAgentPrompt(rule.agent_prompt || "");
 		setRuleActionType(rule.action_type);
 		try {
 			const params = JSON.parse(rule.action_params) as Record<string, unknown>;
 			setRuleActionLabelId((params.label_id as string) || "");
+			setRuleActionPushoverTitle((params.title as string) || "");
+			setRuleActionPushoverMessage((params.message as string) || "");
 		} catch {
 			setRuleActionLabelId("");
+			setRuleActionPushoverTitle("");
+			setRuleActionPushoverMessage("");
 		}
 		setIsRuleDialogOpen(true);
 	};
@@ -192,8 +333,12 @@ export default function SettingsRoute() {
 	const handleSaveRule = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!mailboxId || !ruleName.trim()) return;
-		if (ruleConditions.some((c) => !c.value.trim())) {
+		if (ruleType === "static" && ruleConditions.some((c) => !c.value.trim())) {
 			toastManager.add({ title: "All conditions must have a value", variant: "error" });
+			return;
+		}
+		if (ruleType === "agent" && !ruleAgentPrompt.trim()) {
+			toastManager.add({ title: "Agent prompt is required", variant: "error" });
 			return;
 		}
 		if (ruleActionType === "add_label" && !ruleActionLabelId) {
@@ -206,15 +351,21 @@ export default function SettingsRoute() {
 			if (ruleActionType === "add_label") {
 				actionParams.label_id = ruleActionLabelId;
 			}
+			if (ruleActionType === "send_notification") {
+				if (ruleActionPushoverTitle.trim()) actionParams.title = ruleActionPushoverTitle.trim();
+				if (ruleActionPushoverMessage.trim()) actionParams.message = ruleActionPushoverMessage.trim();
+			}
 			if (editingRuleId) {
 				await updateRuleMutation.mutateAsync({
 					mailboxId,
 					id: editingRuleId,
 					updates: {
 						name: ruleName.trim(),
+						type: ruleType,
 						enabled: ruleEnabled,
 						match_all: ruleMatchAll,
 						conditions: ruleConditions,
+						agent_prompt: ruleAgentPrompt,
 						action_type: ruleActionType,
 						action_params: actionParams,
 					},
@@ -225,9 +376,11 @@ export default function SettingsRoute() {
 					mailboxId,
 					rule: {
 						name: ruleName.trim(),
+						type: ruleType,
 						enabled: ruleEnabled,
 						match_all: ruleMatchAll,
 						conditions: ruleConditions,
+						agent_prompt: ruleAgentPrompt,
 						action_type: ruleActionType,
 						action_params: actionParams,
 					},
@@ -370,21 +523,17 @@ export default function SettingsRoute() {
 								try {
 									const conds = JSON.parse(rule.conditions) as RuleCondition[];
 									conditionsText = conds
-										.map((c) => `${c.field} ${c.operator} "${c.value}"`)
+										.map((c) => c.operator === "classification" ? `AI: "${c.value}"` : `${c.field} ${c.operator} "${c.value}"`)
 										.join(rule.match_all ? " AND " : " OR ");
 								} catch {
 									conditionsText = "Invalid conditions";
 								}
+								if (rule.type === "agent" && rule.agent_prompt) {
+									conditionsText = `AI: "${rule.agent_prompt}"`;
+								}
 								try {
 									const params = JSON.parse(rule.action_params) as Record<string, unknown>;
-									if (rule.action_type === "add_label") {
-										const label = labels.find((l) => l.id === params.label_id);
-										actionText = label
-											? `Add label "${label.name}"`
-											: "Add label (deleted)";
-									} else {
-										actionText = rule.action_type;
-									}
+									actionText = getRuleActionText(rule.action_type, params, labels);
 								} catch {
 									actionText = rule.action_type;
 								}
@@ -414,8 +563,13 @@ export default function SettingsRoute() {
 											</label>
 										</div>
 										<div className="flex-1 min-w-0">
-											<div className="text-sm font-medium text-kumo-default">
-												{rule.name}
+											<div className="flex items-center gap-2">
+												<div className="text-sm font-medium text-kumo-default">
+													{rule.name}
+												</div>
+												<Badge variant={rule.type === "agent" ? "beta" : "secondary"}>
+													{rule.type === "agent" ? "Agent" : "Static"}
+												</Badge>
 											</div>
 											<div className="text-xs text-kumo-subtle mt-0.5">
 												IF {conditionsText}
@@ -447,6 +601,17 @@ export default function SettingsRoute() {
 							})}
 						</div>
 					)}
+				</div>
+
+				{/* Rule Logs */}
+				<div className="rounded-lg border border-kumo-line bg-kumo-base p-5">
+					<div className="flex items-center justify-between mb-4">
+						<div className="flex items-center gap-2">
+							<ScrollIcon size={16} className="text-kumo-subtle" />
+							<span className="text-sm font-medium text-kumo-default">Rule Logs</span>
+						</div>
+					</div>
+					<RuleLogsSection mailboxId={mailboxId} />
 				</div>
 
 				{/* Agent System Prompt */}
@@ -487,6 +652,33 @@ export default function SettingsRoute() {
 						The prompt is sent as the system message to the AI model.
 						It controls the agent&apos;s personality, writing style, and behavior rules.
 					</p>
+				</div>
+
+				{/* Notifications */}
+				<div className="rounded-lg border border-kumo-line bg-kumo-base p-5">
+					<div className="flex items-center gap-2 mb-4">
+						<BellIcon size={16} className="text-kumo-subtle" />
+						<span className="text-sm font-medium text-kumo-default">Notifications</span>
+					</div>
+					<div className="space-y-3">
+						<Input
+							label="Pushover User Key"
+							placeholder="your-pushover-user-key"
+							value={pushoverUserKey}
+							onChange={(e) => setPushoverUserKey(e.target.value)}
+						/>
+						<p className="text-xs text-kumo-subtle">
+							Used by rules with the &quot;Send Pushover notification&quot; action.
+							<a
+								href="https://pushover.net/"
+								target="_blank"
+								rel="noopener noreferrer"
+								className="text-kumo-brand underline"
+							>
+								Get a Pushover account
+							</a>
+						</p>
+					</div>
 				</div>
 
 				{/* Save */}
@@ -544,6 +736,32 @@ export default function SettingsRoute() {
 							required
 						/>
 
+						<div>
+							<div className="text-sm font-medium text-kumo-default mb-2">Rule Type</div>
+							<div className="flex items-center gap-4">
+								<label className="flex items-center gap-2 text-sm text-kumo-default cursor-pointer">
+									<input
+										type="radio"
+										name="ruleType"
+										checked={ruleType === "static"}
+										onChange={() => setRuleType("static")}
+										className="rounded border-kumo-line"
+									/>
+									Static (conditions)
+								</label>
+								<label className="flex items-center gap-2 text-sm text-kumo-default cursor-pointer">
+									<input
+										type="radio"
+										name="ruleType"
+										checked={ruleType === "agent"}
+										onChange={() => setRuleType("agent")}
+										className="rounded border-kumo-line"
+									/>
+									Agent (AI prompt)
+								</label>
+							</div>
+						</div>
+
 						<div className="flex items-center gap-4">
 							<label className="flex items-center gap-2 text-sm text-kumo-default cursor-pointer">
 								<input
@@ -554,91 +772,112 @@ export default function SettingsRoute() {
 								/>
 								Enabled
 							</label>
-							<label className="flex items-center gap-2 text-sm text-kumo-default cursor-pointer">
-								<input
-									type="checkbox"
-									checked={ruleMatchAll}
-									onChange={(e) => setRuleMatchAll(e.target.checked)}
-									className="rounded border-kumo-line"
-								/>
-								Match all conditions
-							</label>
+							{ruleType === "static" && (
+								<label className="flex items-center gap-2 text-sm text-kumo-default cursor-pointer">
+									<input
+										type="checkbox"
+										checked={ruleMatchAll}
+										onChange={(e) => setRuleMatchAll(e.target.checked)}
+										className="rounded border-kumo-line"
+									/>
+									Match all conditions
+								</label>
+							)}
 						</div>
 
-						<div>
-							<div className="text-sm font-medium text-kumo-default mb-2">Conditions</div>
-							<div className="space-y-2">
-								{ruleConditions.map((condition, index) => (
-									<div key={index} className="flex items-center gap-2">
-										<Select
-											value={condition.field}
-											onValueChange={(v) =>
-												updateCondition(index, { field: v as RuleCondition["field"] })
-											}
-										>
-											{CONDITION_FIELDS.map((f) => (
-												<Select.Option key={f.value} value={f.value}>
-													{f.label}
-												</Select.Option>
-											))}
-										</Select>
-										<Select
-											value={condition.operator}
-											onValueChange={(v) =>
-												updateCondition(index, { operator: v as RuleCondition["operator"] })
-											}
-										>
-											{CONDITION_OPERATORS.map((o) => (
-												<Select.Option key={o.value} value={o.value}>
-													{o.label}
-												</Select.Option>
-											))}
-										</Select>
-										<Input
-											placeholder="Value"
-											value={condition.value}
-											onChange={(e) =>
-												updateCondition(index, { value: e.target.value })
-											}
-											className="flex-1"
-										/>
-										{ruleConditions.length > 1 && (
-											<Button
-												variant="ghost"
-												shape="square"
-												size="sm"
-												icon={<XIcon size={14} />}
-												onClick={() => removeCondition(index)}
-												aria-label="Remove condition"
+						{ruleType === "static" ? (
+							<div>
+								<div className="text-sm font-medium text-kumo-default mb-2">Conditions</div>
+								<div className="space-y-2">
+									{ruleConditions.map((condition, index) => (
+										<div key={index} className="flex items-center gap-2">
+											<Select
+												value={condition.field}
+												onValueChange={(v) =>
+													updateCondition(index, { field: v as RuleCondition["field"] })
+												}
+											>
+												{CONDITION_FIELDS.map((f) => (
+													<Select.Option key={f.value} value={f.value}>
+														{f.label}
+													</Select.Option>
+												))}
+											</Select>
+											<Select
+												value={condition.operator}
+												onValueChange={(v) =>
+													updateCondition(index, { operator: v as RuleCondition["operator"] })
+												}
+											>
+												{CONDITION_OPERATORS.map((o) => (
+													<Select.Option key={o.value} value={o.value}>
+														{o.label}
+													</Select.Option>
+												))}
+											</Select>
+											<Input
+												placeholder={condition.operator === "classification" ? "AI prompt, e.g. is this an invoice?" : "Value"}
+												value={condition.value}
+												onChange={(e) =>
+													updateCondition(index, { value: e.target.value })
+												}
+												className="flex-1"
 											/>
-										)}
-									</div>
-								))}
+											{ruleConditions.length > 1 && (
+												<Button
+													variant="ghost"
+													shape="square"
+													size="sm"
+													icon={<XIcon size={14} />}
+													onClick={() => removeCondition(index)}
+													aria-label="Remove condition"
+												/>
+											)}
+										</div>
+									))}
+								</div>
+								<Button
+									variant="ghost"
+									size="sm"
+									icon={<PlusIcon size={14} />}
+									onClick={addCondition}
+									className="mt-2"
+								>
+									Add condition
+								</Button>
 							</div>
-							<Button
-								variant="ghost"
-								size="sm"
-								icon={<PlusIcon size={14} />}
-								onClick={addCondition}
-								className="mt-2"
-							>
-								Add condition
-							</Button>
-						</div>
+						) : (
+							<div>
+								<div className="text-sm font-medium text-kumo-default mb-2">Agent Prompt</div>
+								<p className="text-xs text-kumo-subtle mb-2">
+									Describe what emails should match this rule. The AI will evaluate every incoming email against this prompt.
+								</p>
+								<textarea
+									value={ruleAgentPrompt}
+									onChange={(e) => setRuleAgentPrompt(e.target.value)}
+									placeholder="e.g. This email is from my kids' kindergarten and contains scheduling information."
+									rows={3}
+									className="w-full resize-y rounded-lg border border-kumo-line bg-kumo-recessed px-3 py-2 text-xs text-kumo-default placeholder:text-kumo-subtle focus:outline-none focus:ring-1 focus:ring-kumo-ring"
+									required
+								/>
+							</div>
+						)}
 
 						<div>
 							<div className="text-sm font-medium text-kumo-default mb-2">Action</div>
 							<div className="flex items-center gap-2">
 								<Select
 									value={ruleActionType}
-									onValueChange={(v) => setRuleActionType(v)}
+									onValueChange={(v) => setRuleActionType(v ?? "")}
 								>
 									<Select.Option value="add_label">Add label</Select.Option>
+									<Select.Option value="save_attachment">Save attachments to Drive</Select.Option>
+									<Select.Option value="send_notification">Send Pushover notification</Select.Option>
 								</Select>
 								{ruleActionType === "add_label" && (
 									<Select
 										value={ruleActionLabelId}
-										onValueChange={(v) => setRuleActionLabelId(v)}
+										onValueChange={(v) => setRuleActionLabelId(v ?? "")}
 									>
 										<Select.Option value="">Select label...</Select.Option>
 										{labels.map((label) => (
@@ -649,6 +888,22 @@ export default function SettingsRoute() {
 									</Select>
 								)}
 							</div>
+							{ruleActionType === "send_notification" && (
+								<div className="mt-2 space-y-2">
+									<Input
+										label="Notification title (optional)"
+										placeholder="Defaults to email subject"
+										value={ruleActionPushoverTitle}
+										onChange={(e) => setRuleActionPushoverTitle(e.target.value)}
+									/>
+									<Input
+										label="Notification message (optional)"
+										placeholder="Defaults to sender info"
+										value={ruleActionPushoverMessage}
+										onChange={(e) => setRuleActionPushoverMessage(e.target.value)}
+									/>
+								</div>
+							)}
 						</div>
 
 						<div className="flex justify-end gap-2 pt-2">

@@ -356,21 +356,32 @@ app.get("/api/v1/mailboxes/:mailboxId/rules", async (c: AppContext) => {
 app.post("/api/v1/mailboxes/:mailboxId/rules", async (c: AppContext) => {
 	const body = (await c.req.json()) as {
 		name: string;
+		type?: "static" | "agent";
 		enabled?: boolean;
 		match_all?: boolean;
-		conditions: Array<{ field: string; operator: string; value: string }>;
+		conditions?: Array<{ field: string; operator: string; value: string }>;
+		agent_prompt?: string;
 		action_type: string;
 		action_params: Record<string, unknown>;
 	};
 	if (!body.name?.trim()) return c.json({ error: "Rule name is required" }, 400);
-	if (!body.conditions?.length) return c.json({ error: "At least one condition is required" }, 400);
 	if (!body.action_type) return c.json({ error: "Action type is required" }, 400);
+
+	const ruleType = body.type || "static";
+	if (ruleType === "static") {
+		if (!body.conditions?.length) return c.json({ error: "At least one condition is required for static rules" }, 400);
+	} else if (ruleType === "agent") {
+		if (!body.agent_prompt?.trim()) return c.json({ error: "Agent prompt is required for agent rules" }, 400);
+	}
+
 	const result = await c.var.mailboxStub.createRule({
 		id: crypto.randomUUID(),
 		name: body.name.trim(),
+		type: ruleType,
 		enabled: body.enabled ? 1 : 0,
 		match_all: body.match_all !== false ? 1 : 0,
-		conditions: JSON.stringify(body.conditions),
+		conditions: JSON.stringify(body.conditions || []),
+		agent_prompt: body.agent_prompt || null,
 		action_type: body.action_type,
 		action_params: JSON.stringify(body.action_params),
 	});
@@ -380,17 +391,21 @@ app.post("/api/v1/mailboxes/:mailboxId/rules", async (c: AppContext) => {
 app.put("/api/v1/mailboxes/:mailboxId/rules/:id", async (c: AppContext) => {
 	const body = (await c.req.json()) as Partial<{
 		name: string;
+		type: "static" | "agent";
 		enabled: boolean;
 		match_all: boolean;
 		conditions: Array<{ field: string; operator: string; value: string }>;
+		agent_prompt: string;
 		action_type: string;
 		action_params: Record<string, unknown>;
 	}>;
 	const updates: Record<string, unknown> = {};
 	if (body.name !== undefined) updates.name = body.name.trim();
+	if (body.type !== undefined) updates.type = body.type;
 	if (body.enabled !== undefined) updates.enabled = body.enabled ? 1 : 0;
 	if (body.match_all !== undefined) updates.match_all = body.match_all ? 1 : 0;
 	if (body.conditions !== undefined) updates.conditions = JSON.stringify(body.conditions);
+	if (body.agent_prompt !== undefined) updates.agent_prompt = body.agent_prompt || null;
 	if (body.action_type !== undefined) updates.action_type = body.action_type;
 	if (body.action_params !== undefined) updates.action_params = JSON.stringify(body.action_params);
 	const result = await c.var.mailboxStub.updateRule(c.req.param("id")!, updates);
@@ -399,6 +414,48 @@ app.put("/api/v1/mailboxes/:mailboxId/rules/:id", async (c: AppContext) => {
 
 app.delete("/api/v1/mailboxes/:mailboxId/rules/:id", async (c: AppContext) => {
 	await c.var.mailboxStub.deleteRule(c.req.param("id")!);
+	return c.body(null, 204);
+});
+
+app.get("/api/v1/mailboxes/:mailboxId/rule-logs", async (c: AppContext) => {
+	const page = intQuery(c, "page") ?? 1;
+	const limit = intQuery(c, "limit") ?? 50;
+	const stub = c.var.mailboxStub as any;
+	const logs = await stub.getRuleLogs(limit, (page - 1) * limit);
+	return c.json(logs);
+});
+
+// -- Drive ----------------------------------------------------------
+
+app.get("/api/v1/mailboxes/:mailboxId/drive", async (c: AppContext) => {
+	const page = intQuery(c, "page") ?? 1;
+	const limit = intQuery(c, "limit") ?? 25;
+	const stub = c.var.mailboxStub as any;
+	const result = await stub.listDriveFiles(page, limit);
+	return c.json(result);
+});
+
+app.get("/api/v1/mailboxes/:mailboxId/drive/:fileId/download", async (c: AppContext) => {
+	const fileId = c.req.param("fileId")!;
+	const stub = c.var.mailboxStub as any;
+	const file = await stub.getDriveFile(fileId);
+	if (!file) return c.json({ error: "File not found" }, 404);
+	const obj = await c.env.BUCKET.get(file.r2_key);
+	if (!obj) return c.json({ error: "File blob not found" }, 404);
+	const headers = new Headers();
+	headers.set("Content-Type", file.mimetype);
+	const sanitized = file.filename.replace(/[\x00-\x1f"\\]/g, "_");
+	headers.set("Content-Disposition", `attachment; filename="${sanitized}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
+	return new Response(obj.body, { headers });
+});
+
+app.delete("/api/v1/mailboxes/:mailboxId/drive/:fileId", async (c: AppContext) => {
+	const fileId = c.req.param("fileId")!;
+	const stub = c.var.mailboxStub as any;
+	const file = await stub.getDriveFile(fileId);
+	if (!file) return c.json({ error: "File not found" }, 404);
+	await stub.deleteDriveFile(fileId);
+	await c.env.BUCKET.delete(file.r2_key);
 	return c.body(null, 204);
 });
 

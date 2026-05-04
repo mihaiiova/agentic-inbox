@@ -178,12 +178,24 @@ const api = {
 	// Rules
 	listRules: (mailboxId: string) =>
 		get<import("~/types").Rule[]>(`/api/v1/mailboxes/${mailboxId}/rules`),
-	createRule: (mailboxId: string, rule: { name: string; enabled?: boolean; match_all?: boolean; conditions: Array<{ field: string; operator: string; value: string }>; action_type: string; action_params: Record<string, unknown> }) =>
+	createRule: (mailboxId: string, rule: { name: string; type?: "static" | "agent"; enabled?: boolean; match_all?: boolean; conditions?: Array<{ field: string; operator: string; value: string }>; agent_prompt?: string; action_type: string; action_params: Record<string, unknown> }) =>
 		post<import("~/types").Rule>(`/api/v1/mailboxes/${mailboxId}/rules`, rule),
-	updateRule: (mailboxId: string, id: string, rule: Partial<{ name: string; enabled: boolean; match_all: boolean; conditions: Array<{ field: string; operator: string; value: string }>; action_type: string; action_params: Record<string, unknown> }>) =>
+	updateRule: (mailboxId: string, id: string, rule: Partial<{ name: string; type: "static" | "agent"; enabled: boolean; match_all: boolean; conditions: Array<{ field: string; operator: string; value: string }>; agent_prompt: string; action_type: string; action_params: Record<string, unknown> }>) =>
 		put<import("~/types").Rule>(`/api/v1/mailboxes/${mailboxId}/rules/${id}`, rule),
 	deleteRule: (mailboxId: string, id: string) =>
 		del<void>(`/api/v1/mailboxes/${mailboxId}/rules/${id}`),
+
+	// Rule Logs
+	listRuleLogs: (mailboxId: string, params: { page?: string; limit?: string }) =>
+		get<import("~/types").RuleLog[]>(`/api/v1/mailboxes/${mailboxId}/rule-logs`, { params }),
+
+	// Drive
+	listDriveFiles: (mailboxId: string, params: Record<string, string>) =>
+		get<{ files: import("~/types").DriveFile[]; totalCount: number }>(`/api/v1/mailboxes/${mailboxId}/drive`, { params }),
+	downloadDriveFile: (mailboxId: string, fileId: string) =>
+		get<Blob>(`/api/v1/mailboxes/${mailboxId}/drive/${fileId}/download`, { responseType: "blob" }),
+	deleteDriveFile: (mailboxId: string, fileId: string) =>
+		del<void>(`/api/v1/mailboxes/${mailboxId}/drive/${fileId}`),
 };
 
 export default api;

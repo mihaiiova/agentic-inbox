@@ -201,4 +201,39 @@ export const mailboxMigrations: Migration[] = [
             );
         `),
 	},
+	{
+		name: "10_add_drive_files",
+		sql: txn(`
+            CREATE TABLE drive_files (
+                id TEXT PRIMARY KEY,
+                email_id TEXT REFERENCES emails(id) ON DELETE SET NULL,
+                filename TEXT NOT NULL,
+                mimetype TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                r2_key TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        `),
+	},
+	{
+		name: "11_add_rule_types_and_logs",
+		sql: `
+            ALTER TABLE rules ADD COLUMN type TEXT NOT NULL DEFAULT 'static';
+            ALTER TABLE rules ADD COLUMN agent_prompt TEXT;
+
+            CREATE TABLE rule_logs (
+                id TEXT PRIMARY KEY,
+                email_id TEXT NOT NULL,
+                rule_id TEXT,
+                rule_type TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                details TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX idx_rule_logs_email_id ON rule_logs(email_id);
+            CREATE INDEX idx_rule_logs_created_at ON rule_logs(created_at DESC);
+        `,
+	},
 ];

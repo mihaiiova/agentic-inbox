@@ -62,10 +62,33 @@ export const emailLabels = sqliteTable("email_labels", {
 export const rules = sqliteTable("rules", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
+	type: text("type").notNull().default("static"),
 	enabled: integer("enabled").notNull().default(1),
 	match_all: integer("match_all").notNull().default(1),
 	conditions: text("conditions").notNull(),
+	agent_prompt: text("agent_prompt"),
 	action_type: text("action_type").notNull(),
 	action_params: text("action_params").notNull(),
+	created_at: text("created_at").notNull().default("datetime('now')"),
+});
+
+export const ruleLogs = sqliteTable("rule_logs", {
+	id: text("id").primaryKey(),
+	email_id: text("email_id").notNull(),
+	rule_id: text("rule_id"),
+	rule_type: text("rule_type").notNull(),
+	action_type: text("action_type").notNull(),
+	status: text("status").notNull(),
+	details: text("details").notNull(),
+	created_at: text("created_at").notNull().default("datetime('now')"),
+});
+
+export const driveFiles = sqliteTable("drive_files", {
+	id: text("id").primaryKey(),
+	email_id: text("email_id").references(() => emails.id, { onDelete: "set null" }),
+	filename: text("filename").notNull(),
+	mimetype: text("mimetype").notNull(),
+	size: integer("size").notNull(),
+	r2_key: text("r2_key").notNull(),
 	created_at: text("created_at").notNull().default("datetime('now')"),
 });

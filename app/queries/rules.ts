@@ -4,7 +4,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "~/services/api";
-import type { Rule } from "~/types";
+import type { Rule, RuleLog } from "~/types";
 import { queryKeys } from "./keys";
 
 export function useRules(mailboxId: string | undefined) {
@@ -25,9 +25,11 @@ export function useCreateRule() {
 			mailboxId: string;
 			rule: {
 				name: string;
+				type?: "static" | "agent";
 				enabled?: boolean;
 				match_all?: boolean;
-				conditions: Array<{ field: string; operator: string; value: string }>;
+				conditions?: Array<{ field: string; operator: string; value: string }>;
+				agent_prompt?: string;
 				action_type: string;
 				action_params: Record<string, unknown>;
 			};
@@ -50,9 +52,11 @@ export function useUpdateRule() {
 			id: string;
 			updates: Partial<{
 				name: string;
+				type: "static" | "agent";
 				enabled: boolean;
 				match_all: boolean;
 				conditions: Array<{ field: string; operator: string; value: string }>;
+				agent_prompt: string;
 				action_type: string;
 				action_params: Record<string, unknown>;
 			}>;
@@ -71,5 +75,23 @@ export function useDeleteRule() {
 		onSuccess: (_data, { mailboxId }) => {
 			qc.invalidateQueries({ queryKey: queryKeys.rules.list(mailboxId) });
 		},
+	});
+}
+
+export function useRuleLogs(
+	mailboxId: string | undefined,
+	page = 1,
+	limit = 50,
+) {
+	return useQuery<RuleLog[]>({
+		queryKey: mailboxId
+			? queryKeys.ruleLogs.list(mailboxId, page, limit)
+			: ["rule-logs", "_disabled"],
+		queryFn: () =>
+			api.listRuleLogs(mailboxId!, {
+				page: String(page),
+				limit: String(limit),
+			}),
+		enabled: !!mailboxId,
 	});
 }
