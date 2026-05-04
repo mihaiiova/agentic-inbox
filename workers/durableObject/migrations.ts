@@ -236,4 +236,21 @@ export const mailboxMigrations: Migration[] = [
             CREATE INDEX idx_rule_logs_created_at ON rule_logs(created_at DESC);
         `,
 	},
+	{
+		name: "12_add_execution_logs",
+		sql: `
+            CREATE TABLE execution_logs (
+                id TEXT PRIMARY KEY,
+                email_id TEXT NOT NULL,
+                intent TEXT NOT NULL,
+                rules_evaluated TEXT NOT NULL,
+                plan TEXT NOT NULL,
+                actions_executed TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX idx_execution_logs_email_id ON execution_logs(email_id);
+            CREATE INDEX idx_execution_logs_created_at ON execution_logs(created_at DESC);
+        `,
+	},
 ];

@@ -13,8 +13,10 @@
 import { stripHtmlToText } from "./email-helpers";
 import type { Env } from "../types";
 
-// Use the same fast model as the prompt injection scanner
-const CLASSIFICATION_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+// Use a capable model for classification accuracy. The 8B fast variant misses
+// obvious signals (e.g. forwarded invoices). Kimi k2.5 is the same model used
+// for the main agent chat and handles nuanced classification much better.
+const CLASSIFICATION_MODEL = "@cf/moonshotai/kimi-k2.5";
 
 const SINGLE_CLASSIFICATION_PROMPT = `You are a classifier that evaluates emails against a user-defined criterion.
 

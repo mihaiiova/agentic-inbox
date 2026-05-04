@@ -8,6 +8,7 @@ import {
 	CaretLeftIcon,
 	FileIcon,
 	FolderIcon,
+	HardDrivesIcon,
 	PaperPlaneTiltIcon,
 	PencilSimpleIcon,
 	PlusIcon,
@@ -169,6 +170,13 @@ export default function Sidebar() {
 						onClick={handleNavClick}
 					/>
 				))}
+
+				<FolderLink
+					to={`/mailbox/${mailboxId}/drive`}
+					icon={<HardDrivesIcon size={18} weight="regular" />}
+					label="Drive"
+					onClick={handleNavClick}
+				/>
 
 				{/* Custom folders */}
 				{customFolders.length > 0 && (

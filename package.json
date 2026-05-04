@@ -5,7 +5,12 @@
 	"type": "module",
 	"cloudflare": {
 		"label": "Agentic Inbox",
-		"products": ["Workers", "Durable Objects", "R2", "Workers AI"],
+		"products": [
+			"Workers",
+			"Durable Objects",
+			"R2",
+			"Workers AI"
+		],
 		"bindings": {
 			"DOMAINS": {
 				"description": "Your domain with [Email Routing](https://developers.cloudflare.com/email-routing/) enabled (e.g. `example.com`). After deploying, create a catch-all Email Routing rule pointing to this Worker."
@@ -18,9 +23,12 @@
 		"deploy": "npm run build && wrangler deploy",
 		"dev": "react-router dev",
 		"preview": "npm run build && vite preview",
+		"test": "vitest run",
+		"test:watch": "vitest",
 		"typecheck": "npm run cf-typegen && react-router typegen && tsc -b"
 	},
 	"dependencies": {
+		"@ai-sdk/react": "^3.0.172",
 		"@cloudflare/ai-chat": "^0.1.8",
 		"@cloudflare/kumo": "^1.13.0",
 		"@phosphor-icons/react": "^2.1.10",
@@ -82,17 +90,24 @@
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "^1.0.12",
+		"@cloudflare/vitest-pool-workers": "^0.15.1",
 		"@cloudflare/workers-types": "^4.20251128.0",
 		"@react-router/dev": "^7.5.3",
 		"@tailwindcss/vite": "^4.1.4",
+		"@testing-library/dom": "^10.4.1",
+		"@testing-library/jest-dom": "^6.9.1",
+		"@testing-library/react": "^16.3.2",
 		"@types/dompurify": "^3.0.5",
 		"@types/node": "^20.19.37",
 		"@types/react": "^19.1.2",
 		"@types/react-dom": "^19.1.2",
+		"better-sqlite3": "^12.9.0",
+		"jsdom": "^29.1.1",
 		"tailwindcss": "^4.1.4",
 		"typescript": "^5.8.3",
 		"vite": "^6.3.3",
 		"vite-tsconfig-paths": "^5.1.4",
+		"vitest": "^4.1.5",
 		"wrangler": "^4.74.0"
 	}
 }

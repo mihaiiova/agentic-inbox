@@ -92,3 +92,13 @@ export const driveFiles = sqliteTable("drive_files", {
 	r2_key: text("r2_key").notNull(),
 	created_at: text("created_at").notNull().default("datetime('now')"),
 });
+
+export const executionLogs = sqliteTable("execution_logs", {
+	id: text("id").primaryKey(),
+	email_id: text("email_id").notNull(),
+	intent: text("intent").notNull(),
+	rules_evaluated: text("rules_evaluated").notNull(),
+	plan: text("plan").notNull(),
+	actions_executed: text("actions_executed").notNull(),
+	created_at: text("created_at").notNull().default("datetime('now')"),
+});

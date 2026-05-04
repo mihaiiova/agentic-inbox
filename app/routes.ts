@@ -15,6 +15,7 @@ export default [
 		route("emails/:folder", "routes/email-list.tsx"),
 		route("settings", "routes/settings.tsx"),
 		route("search", "routes/search-results.tsx"),
+		route("drive", "routes/drive.tsx"),
 	]),
 	route("*", "routes/not-found.tsx"),
 ] satisfies RouteConfig;

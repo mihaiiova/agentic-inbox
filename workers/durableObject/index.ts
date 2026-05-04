@@ -101,49 +101,8 @@ interface AttachmentData {
 	disposition?: string | null;
 }
 
-interface RuleCondition {
-	field: "from" | "to" | "cc" | "subject" | "body";
-	operator: "contains" | "equals" | "starts_with" | "ends_with" | "matches" | "classification";
-	value: string;
-}
-
-function getFieldValue(email: EmailData, field: RuleCondition["field"]): string {
-	switch (field) {
-		case "from": return email.sender || "";
-		case "to": return email.recipient || "";
-		case "cc": return email.cc || "";
-		case "subject": return email.subject || "";
-		case "body": return email.body || "";
-		default: return "";
-	}
-}
-
-function matchesStringCondition(email: EmailData, condition: RuleCondition): boolean {
-	const fieldValue = getFieldValue(email, condition.field);
-	if (!fieldValue) return false;
-
-	const haystack = fieldValue.toLowerCase();
-	const needle = condition.value.toLowerCase();
-
-	switch (condition.operator) {
-		case "contains":
-			return haystack.includes(needle);
-		case "equals":
-			return haystack === needle;
-		case "starts_with":
-			return haystack.startsWith(needle);
-		case "ends_with":
-			return haystack.endsWith(needle);
-		case "matches":
-			try {
-				return new RegExp(condition.value, "i").test(fieldValue);
-			} catch {
-				return false;
-			}
-		default:
-			return false;
-	}
-}
+import { evaluateRules, type RuleResult } from "../orchestrator/evaluate";
+import { orchestrateEmail, buildContext } from "../orchestrator";
 
 export class MailboxDO extends DurableObject<Env> {
 	declare __DURABLE_OBJECT_BRAND: never;
@@ -1104,149 +1063,44 @@ export class MailboxDO extends DurableObject<Env> {
 
 	// ── Rule Engine ────────────────────────────────────────────────
 
-	async applyRules(email: EmailData) {
+	/**
+	 * Evaluate all rules for an email and return structured results.
+	 * Does NOT execute actions — the orchestrator handles execution.
+	 * Still writes low-level rule_logs for audit purposes.
+	 */
+	async applyRules(email: EmailData): Promise<RuleResult[]> {
 		const rules = await this.getRules();
-		for (const rule of rules) {
-			if (!rule.enabled) continue;
-			if (rule.type === "agent") continue; // Agent rules are evaluated separately
+		const { evaluateRules: doEvaluate } = await import("../orchestrator/evaluate");
+		const { buildContext } = await import("../orchestrator/context");
+
+		const mailboxId = email.recipient.split(",")[0].trim();
+		const ctx = await buildContext(
+			mailboxId,
+			{ ...email, read: !!email.read, starred: !!email.starred },
+			this.env,
+		);
+		const results = await doEvaluate(ctx, rules);
+
+		// Write rule_logs for each result (low-level audit trail)
+		for (const result of results) {
 			try {
-				const conditions = JSON.parse(rule.conditions) as RuleCondition[];
-				const actionParams = JSON.parse(rule.action_params) as Record<string, unknown>;
-				const { matched, conditionResults } = await this.#evaluateStaticRule(email, conditions, !!rule.match_all);
-				if (matched) {
-					await this.#executeRuleAction(email, rule.action_type, actionParams);
-				}
-				await this.#logRuleExecution({
+				this.db.insert(schema.ruleLogs).values({
+					id: crypto.randomUUID(),
 					email_id: email.id,
-					rule_id: rule.id,
-					rule_type: "static",
-					action_type: rule.action_type,
-					status: matched ? "matched" : "not_matched",
+					rule_id: result.ruleId,
+					rule_type: result.ruleType,
+					action_type: result.actionType,
+					status: result.matched ? "matched" : "not_matched",
 					details: JSON.stringify({
-						match_all: rule.match_all,
-						conditionResults,
+						conditionResults: result.conditionResults,
 					}),
-				});
+				}).run();
 			} catch (e) {
-				console.warn(`Rule ${rule.id} failed:`, (e as Error).message);
-				await this.#logRuleExecution({
-					email_id: email.id,
-					rule_id: rule.id,
-					rule_type: "static",
-					action_type: rule.action_type,
-					status: "failed",
-					details: JSON.stringify({ error: (e as Error).message }),
-				});
-			}
-		}
-		// Evaluate agent rules in a single batch
-		const agentRules = rules.filter((r) => r.enabled && r.type === "agent" && r.agent_prompt);
-		if (agentRules.length > 0) {
-			try {
-				const { classifyEmailBatch } = await import("../lib/classification");
-				const prompts = agentRules.map((r) => ({ ruleId: r.id, prompt: r.agent_prompt! }));
-				const matchedIds = await classifyEmailBatch(this.env, email, prompts);
-				for (const rule of agentRules) {
-					const matched = matchedIds.includes(rule.id);
-					const actionParams = JSON.parse(rule.action_params) as Record<string, unknown>;
-					if (matched) {
-						await this.#executeRuleAction(email, rule.action_type, actionParams);
-					}
-					await this.#logRuleExecution({
-						email_id: email.id,
-						rule_id: rule.id,
-						rule_type: "agent",
-						action_type: rule.action_type,
-						status: matched ? "matched" : "not_matched",
-						details: JSON.stringify({
-							agent_prompt: rule.agent_prompt,
-							matched,
-						}),
-					});
-				}
-			} catch (e) {
-				console.warn("Agent rule batch evaluation failed:", (e as Error).message);
-				for (const rule of agentRules) {
-					await this.#logRuleExecution({
-						email_id: email.id,
-						rule_id: rule.id,
-						rule_type: "agent",
-						action_type: rule.action_type,
-						status: "failed",
-						details: JSON.stringify({
-							error: (e as Error).message,
-							agent_prompt: rule.agent_prompt,
-						}),
-					});
-				}
-			}
-		}
-	}
-
-	async #evaluateStaticRule(
-		email: EmailData,
-		conditions: RuleCondition[],
-		matchAll: boolean,
-	): Promise<{ matched: boolean; conditionResults: Array<{ field?: string; operator: string; value: string; result: boolean }> }> {
-		if (conditions.length === 0) return { matched: true, conditionResults: [] };
-
-		const conditionResults: Array<{ field?: string; operator: string; value: string; result: boolean }> = [];
-
-		// Split into cheap string conditions and expensive classification conditions
-		const stringConditions = conditions.filter((c) => c.operator !== "classification");
-		const classificationConditions = conditions.filter((c) => c.operator === "classification");
-
-		// Evaluate string conditions first
-		for (const condition of stringConditions) {
-			const result = matchesStringCondition(email, condition);
-			conditionResults.push({
-				field: condition.field,
-				operator: condition.operator,
-				value: condition.value,
-				result,
-			});
-		}
-
-		// Short-circuit optimizations
-		if (matchAll) {
-			// AND logic: if any string condition fails, the whole rule fails
-			if (conditionResults.some((r) => !r.result)) {
-				return { matched: false, conditionResults };
-			}
-			// All string conditions passed — now evaluate classification conditions
-		} else {
-			// OR logic: if any string condition passes, the whole rule passes
-			if (conditionResults.some((r) => r.result)) {
-				return { matched: true, conditionResults };
-			}
-			// No string condition passed — need classification conditions to save the rule
-		}
-
-		// Evaluate classification conditions with a per-rule cache
-		const classificationCache = new Map<string, boolean>();
-		for (const condition of classificationConditions) {
-			const prompt = condition.value;
-			let result = classificationCache.get(prompt);
-			if (result === undefined) {
-				result = await classifyEmail(this.env, email, prompt);
-				classificationCache.set(prompt, result);
-			}
-			conditionResults.push({
-				operator: "classification",
-				value: prompt,
-				result,
-			});
-			if (matchAll) {
-				if (!result) return { matched: false, conditionResults }; // AND: one classification failed
-			} else {
-				if (result) return { matched: true, conditionResults }; // OR: one classification passed
+				console.warn("Failed to write rule log:", (e as Error).message);
 			}
 		}
 
-		// If we get here:
-		// - matchAll: all string conditions passed, all classification conditions passed
-		// - matchAny: no string condition passed, no classification condition passed
-		return { matched: matchAll, conditionResults };
+		return results;
 	}
 
 	async #logRuleExecution(entry: {
@@ -1417,9 +1271,23 @@ export class MailboxDO extends DurableObject<Env> {
 			this.db.insert(schema.attachments).values(attachments).run();
 		}
 
-		// Apply rules to incoming emails (only for inbox — sent/draft emails are user-created)
+		// Orchestrate inbound emails (only for inbox — sent/draft emails are user-created)
 		if (folderId === Folders.INBOX) {
-			this.ctx.waitUntil(this.applyRules(email));
+			this.ctx.waitUntil(
+				(async () => {
+					const rules = await this.getRules();
+					const mailboxId = email.recipient.split(",")[0].trim();
+					const ctx = await buildContext(
+						mailboxId,
+						{ ...email, read: !!email.read, starred: !!email.starred },
+						this.env,
+					);
+					await orchestrateEmail(ctx, rules, {
+						db: this.db,
+						sqlExec: (sql: string, ...params: unknown[]) => this.ctx.storage.sql.exec(sql, ...params),
+					});
+				})(),
+			);
 		}
 	}
 }
