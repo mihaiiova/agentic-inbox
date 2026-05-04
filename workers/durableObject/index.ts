@@ -11,7 +11,6 @@ import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
 import { applyMigrations, mailboxMigrations } from "./migrations";
 import { sendPushoverNotification, getMailboxPushoverKey } from "../lib/notifications";
-import { classifyEmail } from "../lib/classification";
 
 /**
  * SQL expression to normalize email subjects by stripping common
@@ -1074,9 +1073,17 @@ export class MailboxDO extends DurableObject<Env> {
 		const { buildContext } = await import("../orchestrator/context");
 
 		const mailboxId = email.recipient.split(",")[0].trim();
+
+		// Fetch attachments to provide context for AI classification
+		const emailAttachments = this.db
+			.select({ filename: schema.attachments.filename, mimetype: schema.attachments.mimetype, size: schema.attachments.size })
+			.from(schema.attachments)
+			.where(eq(schema.attachments.email_id, email.id))
+			.all();
+
 		const ctx = await buildContext(
 			mailboxId,
-			{ ...email, read: !!email.read, starred: !!email.starred },
+			{ ...email, read: !!email.read, starred: !!email.starred, attachments: emailAttachments },
 			this.env,
 		);
 		const results = await doEvaluate(ctx, rules);
@@ -1277,9 +1284,14 @@ export class MailboxDO extends DurableObject<Env> {
 				(async () => {
 					const rules = await this.getRules();
 					const mailboxId = email.recipient.split(",")[0].trim();
+					const attachmentContext = attachments.map((a) => ({
+						filename: a.filename,
+						mimetype: a.mimetype,
+						size: a.size,
+					}));
 					const ctx = await buildContext(
 						mailboxId,
-						{ ...email, read: !!email.read, starred: !!email.starred },
+						{ ...email, read: !!email.read, starred: !!email.starred, attachments: attachmentContext },
 						this.env,
 					);
 					await orchestrateEmail(ctx, rules, {

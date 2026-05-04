@@ -25,6 +25,7 @@ export type EmailRecord = {
 	raw_headers?: string | null;
 	read: boolean;
 	starred: boolean;
+	attachments?: Array<{ filename: string; mimetype: string; size?: number }>;
 };
 
 /**
