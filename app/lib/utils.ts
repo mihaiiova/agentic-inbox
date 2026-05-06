@@ -130,6 +130,62 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * Detect whether a string looks like HTML rather than plain text.
+ *
+ * Heuristic: look for common HTML tags. This avoids false positives on
+ * innocent uses of `<` and `>` such as `if (x < 5 && y > 3)` or
+ * `<test@example.com>`.
+ */
+export function isHtml(body: string): boolean {
+	return /<(div|p|br|a|span|table|tr|td|th|h[1-6]|ul|ol|li|blockquote|pre|code|strong|em|b|i|img|head|body|html|form|input|button|script|style|meta|title|iframe|canvas|video|audio|source|nav|header|footer|section|article)\b[^>]*>/i.test(body);
+}
+
+/**
+ * Turn a plain-text string into safe HTML with preserved line breaks and
+ * auto-linked URLs / email addresses.
+ *
+ * 1. Escapes HTML special characters.
+ * 2. Converts `\n` to `<br>`.
+ * 3. Wraps `http://`, `https://`, and `www.*` URLs in anchor tags.
+ * 4. Wraps email addresses in `mailto:` anchor tags.
+ * 5. Wraps the result in a `white-space: pre-wrap` div for belt-and-suspenders
+ *    line-break rendering in clients that strip `<br>`.
+ */
+export function formatPlainText(text: string): string {
+	if (!text) return "";
+
+	let html = escapeHtml(text).replace(/\n/g, "<br>");
+
+	// URLs with scheme — strip trailing punctuation that likely isn't part of the URL
+	html = html.replace(
+		/(https?:\/\/[^\s<]+)/gi,
+		(match) => {
+			const cleaned = match.replace(/[.,;:!?)">\]]+$/, "");
+			const trailing = match.slice(cleaned.length);
+			return `<a href="${cleaned}" target="_blank" rel="noopener noreferrer">${cleaned}</a>${trailing}`;
+		},
+	);
+
+	// www. without scheme
+	html = html.replace(
+		/(^|\s)(www\.[^\s<]+)/gi,
+		(_match, prefix, url) => {
+			const cleaned = url.replace(/[.,;:!?)">\]]+$/, "");
+			const trailing = url.slice(cleaned.length);
+			return `${prefix}<a href="https://${cleaned}" target="_blank" rel="noopener noreferrer">${cleaned}</a>${trailing}`;
+		},
+	);
+
+	// Email addresses
+	html = html.replace(
+		/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi,
+		'<a href="mailto:$1">$1</a>',
+	);
+
+	return `<div style="white-space:pre-wrap">${html}</div>`;
+}
+
+/**
  * Generate the HTML signature block for compose forms.
  */
 export function getSignatureBlock(settings?: {

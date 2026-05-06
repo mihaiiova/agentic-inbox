@@ -76,6 +76,7 @@ export const ruleLogs = sqliteTable("rule_logs", {
 	id: text("id").primaryKey(),
 	email_id: text("email_id").notNull(),
 	rule_id: text("rule_id"),
+	rule_name: text("rule_name"),
 	rule_type: text("rule_type").notNull(),
 	action_type: text("action_type").notNull(),
 	status: text("status").notNull(),

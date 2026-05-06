@@ -9,6 +9,7 @@ import { useParams } from "react-router";
 import { useMailbox, useUpdateMailbox } from "~/queries/mailboxes";
 import { useLabels, useCreateLabel, useDeleteLabel } from "~/queries/labels";
 import { useRules, useCreateRule, useUpdateRule, useDeleteRule, useRuleLogs } from "~/queries/rules";
+import { formatDetailDate } from "../../shared/dates";
 import type { RuleCondition, RuleLog } from "~/types";
 
 export function getRuleActionText(
@@ -123,10 +124,13 @@ function RuleLogsSection({ mailboxId }: { mailboxId: string | undefined }) {
 									onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
 								>
 									<td className="py-1.5 px-2 text-kumo-subtle whitespace-nowrap">
-										{new Date(log.created_at).toLocaleString()}
+										{formatDetailDate(log.created_at)}
 									</td>
 									<td className="py-1.5 px-2 text-kumo-default">
-										{log.rule_id ? log.rule_id.slice(0, 8) : "—"}
+										{log.rule_name || (log.rule_id ? log.rule_id.slice(0, 8) : "—")}
+										{log.rule_name && log.rule_id && (
+											<span className="block text-[10px] text-kumo-subtle">{log.rule_id.slice(0, 8)}</span>
+										)}
 									</td>
 									<td className="py-1.5 px-2">
 										<Badge variant={log.rule_type === "agent" ? "beta" : "secondary"}>

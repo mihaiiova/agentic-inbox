@@ -100,7 +100,7 @@ interface AttachmentData {
 	disposition?: string | null;
 }
 
-import { evaluateRules, type RuleResult } from "../orchestrator/evaluate";
+import { evaluateRules } from "../orchestrator/evaluate";
 import { orchestrateEmail, buildContext } from "../orchestrator";
 
 export class MailboxDO extends DurableObject<Env> {
@@ -1062,72 +1062,6 @@ export class MailboxDO extends DurableObject<Env> {
 
 	// ── Rule Engine ────────────────────────────────────────────────
 
-	/**
-	 * Evaluate all rules for an email and return structured results.
-	 * Does NOT execute actions — the orchestrator handles execution.
-	 * Still writes low-level rule_logs for audit purposes.
-	 */
-	async applyRules(email: EmailData): Promise<RuleResult[]> {
-		const rules = await this.getRules();
-		const { evaluateRules: doEvaluate } = await import("../orchestrator/evaluate");
-		const { buildContext } = await import("../orchestrator/context");
-
-		const mailboxId = email.recipient.split(",")[0].trim();
-
-		// Fetch attachments to provide context for AI classification
-		const emailAttachments = this.db
-			.select({ filename: schema.attachments.filename, mimetype: schema.attachments.mimetype, size: schema.attachments.size })
-			.from(schema.attachments)
-			.where(eq(schema.attachments.email_id, email.id))
-			.all();
-
-		const ctx = await buildContext(
-			mailboxId,
-			{ ...email, read: !!email.read, starred: !!email.starred, attachments: emailAttachments },
-			this.env,
-		);
-		const results = await doEvaluate(ctx, rules);
-
-		// Write rule_logs for each result (low-level audit trail)
-		for (const result of results) {
-			try {
-				this.db.insert(schema.ruleLogs).values({
-					id: crypto.randomUUID(),
-					email_id: email.id,
-					rule_id: result.ruleId,
-					rule_type: result.ruleType,
-					action_type: result.actionType,
-					status: result.matched ? "matched" : "not_matched",
-					details: JSON.stringify({
-						conditionResults: result.conditionResults,
-					}),
-				}).run();
-			} catch (e) {
-				console.warn("Failed to write rule log:", (e as Error).message);
-			}
-		}
-
-		return results;
-	}
-
-	async #logRuleExecution(entry: {
-		email_id: string;
-		rule_id: string;
-		rule_type: string;
-		action_type: string;
-		status: string;
-		details: string;
-	}) {
-		try {
-			this.db.insert(schema.ruleLogs).values({
-				id: crypto.randomUUID(),
-				...entry,
-			}).run();
-		} catch (e) {
-			console.warn("Failed to write rule log:", (e as Error).message);
-		}
-	}
-
 	async getRuleLogs(limit = 50, offset = 0) {
 		return this.db
 			.select()
@@ -1282,22 +1216,27 @@ export class MailboxDO extends DurableObject<Env> {
 		if (folderId === Folders.INBOX) {
 			this.ctx.waitUntil(
 				(async () => {
-					const rules = await this.getRules();
-					const mailboxId = email.recipient.split(",")[0].trim();
-					const attachmentContext = attachments.map((a) => ({
-						filename: a.filename,
-						mimetype: a.mimetype,
-						size: a.size,
-					}));
-					const ctx = await buildContext(
-						mailboxId,
-						{ ...email, read: !!email.read, starred: !!email.starred, attachments: attachmentContext },
-						this.env,
-					);
-					await orchestrateEmail(ctx, rules, {
-						db: this.db,
-						sqlExec: (sql: string, ...params: unknown[]) => this.ctx.storage.sql.exec(sql, ...params),
-					});
+					try {
+						const rules = await this.getRules();
+						const mailboxId = email.recipient.split(",")[0].trim();
+						const attachmentContext = attachments.map((a) => ({
+							filename: a.filename,
+							mimetype: a.mimetype,
+							size: a.size,
+						}));
+						const ctx = await buildContext(
+							mailboxId,
+							{ ...email, read: !!email.read, starred: !!email.starred, attachments: attachmentContext },
+							this.env,
+						);
+						const plan = await orchestrateEmail(ctx, rules, {
+							db: this.db,
+							sqlExec: (sql: string, ...params: unknown[]) => this.ctx.storage.sql.exec(sql, ...params),
+						});
+						console.log(`[orchestrateEmail] plan executed for ${email.id}: ${plan.actions.length} actions`);
+					} catch (e) {
+						console.error(`[orchestrateEmail] failed for ${email.id}:`, (e as Error).message, (e as Error).stack);
+					}
 				})(),
 			);
 		}

@@ -43,6 +43,30 @@ type RateLimitStub = {
 	checkSendRateLimit: () => Promise<string | null>;
 };
 
+type DriveFileStub = {
+	listDriveFiles: (page?: number, limit?: number) => Promise<{
+		files: Array<{
+			id: string;
+			email_id: string | null;
+			filename: string;
+			mimetype: string;
+			size: number;
+			created_at: string;
+		}>;
+		totalCount: number;
+	}>;
+	getDriveFile: (id: string) => Promise<{
+		id: string;
+		email_id: string | null;
+		filename: string;
+		mimetype: string;
+		size: number;
+		r2_key: string;
+		created_at: string;
+	} | null>;
+	deleteDriveFile: (id: string) => Promise<boolean>;
+};
+
 // ── list_mailboxes ─────────────────────────────────────────────────
 
 export async function toolListMailboxes(env: Env) {
@@ -528,4 +552,41 @@ export async function toolSendEmail(
 	);
 
 	return { status: "sent", messageId, message: `Email sent to ${params.to}` };
+}
+
+// ── drive files ────────────────────────────────────────────────────
+
+export async function toolListDriveFiles(
+	env: Env,
+	mailboxId: string,
+	params: { page?: number; limit?: number },
+) {
+	const stub = getMailboxStub(env, mailboxId) as unknown as DriveFileStub;
+	return stub.listDriveFiles(params.page, params.limit);
+}
+
+export async function toolGetDriveFile(
+	env: Env,
+	mailboxId: string,
+	fileId: string,
+) {
+	const stub = getMailboxStub(env, mailboxId) as unknown as DriveFileStub;
+	const file = await stub.getDriveFile(fileId);
+	if (!file) return { error: "Drive file not found" };
+	return file;
+}
+
+export async function toolDeleteDriveFile(
+	env: Env,
+	mailboxId: string,
+	fileId: string,
+) {
+	const stub = getMailboxStub(env, mailboxId) as unknown as DriveFileStub;
+	const file = await stub.getDriveFile(fileId);
+	if (!file) return { error: "Drive file not found" };
+
+	await stub.deleteDriveFile(fileId);
+	await env.BUCKET.delete(file.r2_key);
+
+	return { status: "deleted", fileId, filename: file.filename };
 }

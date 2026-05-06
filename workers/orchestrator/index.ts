@@ -13,8 +13,10 @@ import { evaluateRules } from "./evaluate";
 import { generatePlan } from "./plan";
 import { executePlan } from "./execute";
 import { writeExecutionLog } from "./logger";
+import { ruleLogs } from "../db/schema";
 import type { OrchestratorContext } from "./context";
 import type { Plan } from "./plan";
+import type { RuleResult } from "./evaluate";
 
 type OrchestratorDeps = {
 	db: {
@@ -23,6 +25,33 @@ type OrchestratorDeps = {
 	};
 	sqlExec: (sql: string, ...params: unknown[]) => { [Symbol.iterator](): Iterator<unknown> };
 };
+
+function writeRuleLogs(
+	results: RuleResult[],
+	emailId: string,
+	deps: OrchestratorDeps,
+) {
+	for (const result of results) {
+		try {
+			deps.db.insert(ruleLogs).values({
+				id: crypto.randomUUID(),
+				email_id: emailId,
+				rule_id: result.ruleId,
+				rule_name: result.ruleName,
+				rule_type: result.ruleType,
+				action_type: result.actionType,
+				status: result.matched ? "matched" : "not_matched",
+				details: JSON.stringify({
+					conditionResults: result.conditionResults,
+					actionParams: result.actionParams,
+				}),
+				created_at: new Date().toISOString(),
+			}).run();
+		} catch (e) {
+			console.warn("Failed to write rule log:", (e as Error).message);
+		}
+	}
+}
 
 /**
  * Central entry point for inbound email orchestration.
@@ -47,6 +76,8 @@ export async function orchestrateEmail(
 	}
 
 	const actionsExecuted = await executePlan(plan, ctx, { db: deps.db, env: ctx.env });
+
+	writeRuleLogs(ruleResults, ctx.email.id, deps);
 
 	await writeExecutionLog(
 		{

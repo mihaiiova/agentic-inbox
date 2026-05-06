@@ -18,6 +18,75 @@ import type { Env } from "../types";
 // for the main agent chat and handles nuanced classification much better.
 const CLASSIFICATION_MODEL = "@cf/moonshotai/kimi-k2.5";
 
+/**
+ * Run an AI inference call through AI Gateway when configured, otherwise
+ * fall back to the native env.AI.run() binding.
+ *
+ * AI Gateway provides observability (prompt/response logs, latency, tokens,
+ * costs) in the Cloudflare dashboard. Set AI_GATEWAY_ID to the gateway name.
+ */
+/**
+ * Extract the text content from an AI response.
+ * Handles both native Workers AI format ({ response?: string })
+ * and AI Gateway OpenAI-compatible format ({ choices?: [{ message?: { content?: string } }] }).
+ */
+function extractResponseText(raw: unknown): string {
+	if (!raw) return "";
+
+	// Native Workers AI format
+	if (typeof (raw as { response?: string }).response === "string") {
+		return (raw as { response: string }).response;
+	}
+
+	// AI Gateway / OpenAI-compatible format
+	const choices = (raw as { choices?: Array<{ message?: { content?: string | null } }> }).choices;
+	if (Array.isArray(choices) && choices.length > 0) {
+		const content = choices[0]?.message?.content;
+		if (typeof content === "string") return content;
+	}
+
+	return "";
+}
+
+/**
+ * Run an AI inference call through AI Gateway when configured, otherwise
+ * fall back to the native env.AI.run() binding.
+ *
+ * AI Gateway provides observability (prompt/response logs, latency, tokens,
+ * costs) in the Cloudflare dashboard. Set AI_GATEWAY_ID to the gateway name.
+ */
+async function runAi(
+	env: Env,
+	model: string,
+	input: { messages: Array<{ role: string; content: string }>; max_tokens: number; temperature: number },
+): Promise<{ response?: string }> {
+	const gatewayId = env.AI_GATEWAY_ID;
+
+	let raw: unknown;
+	if (gatewayId) {
+		raw = await env.AI.run(
+			// @ts-expect-error — model string not in generated union
+			model,
+			input,
+			{
+				gateway: {
+					id: gatewayId,
+					collectLog: true,
+				},
+			},
+		);
+	} else {
+		// Fallback to native binding without Gateway
+		raw = await env.AI.run(
+			// @ts-expect-error — model string not in generated union
+			model,
+			input,
+		);
+	}
+
+	return { response: extractResponseText(raw) };
+}
+
 const SINGLE_CLASSIFICATION_PROMPT = `You are a classifier that evaluates emails against a user-defined criterion.
 
 The user will provide an EMAIL and a PROMPT. You must determine whether the email matches the prompt.
@@ -44,6 +113,7 @@ IMPORTANT GUIDELINES:
 - If the email contains a forwarded message, consider the ORIGINAL forwarded content when evaluating rules, not just the outer forwarding wrapper.
 - If the email has attachments (especially PDFs, invoices, receipts), consider them as strong signals for invoice/payment related rules.
 - Be generous in matching: if the email or its forwarded content is clearly an invoice, receipt, payment confirmation, or billing notice, it matches.
+- Be concise. Do not write out your reasoning. Immediately output the JSON response.
 
 Respond ONLY with a JSON object in this exact format:
 {"matchedRuleIds": ["rule-id-1", "rule-id-2"]}
@@ -90,21 +160,17 @@ export async function classifyEmail(
 		console.log("[classifyEmail] userContent length:", userContent.length);
 		console.log("[classifyEmail] userContent preview:", userContent.slice(0, 500));
 
-		const response = (await env.AI.run(
-			// @ts-expect-error — model string not in generated union
-			CLASSIFICATION_MODEL,
-			{
-				messages: [
-					{ role: "system", content: SINGLE_CLASSIFICATION_PROMPT },
-					{
-						role: "user",
-						content: userContent,
-					},
-				],
-				max_tokens: 64,
-				temperature: 0,
-			},
-		)) as { response?: string };
+		const response = await runAi(env, CLASSIFICATION_MODEL, {
+			messages: [
+				{ role: "system", content: SINGLE_CLASSIFICATION_PROMPT },
+				{
+					role: "user",
+					content: userContent,
+				},
+			],
+			max_tokens: 64,
+			temperature: 0,
+		});
 
 		const raw = (response?.response || "").trim();
 		console.log("[classifyEmail] AI raw response:", raw);
@@ -139,21 +205,17 @@ export async function classifyEmailBatch(
 		console.log("[classifyEmailBatch] userContent length:", userContent.length);
 		console.log("[classifyEmailBatch] userContent preview:", userContent.slice(0, 800));
 
-		const response = (await env.AI.run(
-			// @ts-expect-error — model string not in generated union
-			CLASSIFICATION_MODEL,
-			{
-				messages: [
-					{ role: "system", content: BATCH_CLASSIFICATION_PROMPT },
-					{
-						role: "user",
-						content: userContent,
-					},
-				],
-				max_tokens: 256,
-				temperature: 0,
-			},
-		)) as { response?: string };
+		const response = await runAi(env, CLASSIFICATION_MODEL, {
+			messages: [
+				{ role: "system", content: BATCH_CLASSIFICATION_PROMPT },
+				{
+					role: "user",
+					content: userContent,
+				},
+			],
+			max_tokens: 512,
+			temperature: 0,
+		});
 
 		const raw = (response?.response || "").trim();
 		console.log("[classifyEmailBatch] AI raw response:", raw);

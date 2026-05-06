@@ -6,6 +6,7 @@ export default defineConfig({
 		alias: {
 			"cloudflare:workers": path.resolve(__dirname, "tests/mocks/cloudflare-workers.ts"),
 			"~": path.resolve(__dirname, "app"),
+			"shared": path.resolve(__dirname, "shared"),
 		},
 	},
 	esbuild: {

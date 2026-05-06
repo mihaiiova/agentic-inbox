@@ -4,6 +4,7 @@
 
 import DOMPurify from "dompurify";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatPlainText, isHtml } from "~/lib/utils";
 
 interface EmailIframeProps {
 	body: string;
@@ -59,7 +60,8 @@ export default function EmailIframe({ body, autoSize }: EmailIframeProps) {
 		const iframe = iframeRef.current;
 		if (!iframe || !body) return;
 
-		const cleanBody = DOMPurify.sanitize(body, {
+		const bodyToRender = isHtml(body) ? body : formatPlainText(body);
+		const cleanBody = DOMPurify.sanitize(bodyToRender, {
 			USE_PROFILES: { html: true },
 			FORBID_TAGS: ["style"],
 			ADD_ATTR: ["target"],

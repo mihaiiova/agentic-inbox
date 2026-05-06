@@ -82,19 +82,30 @@ async function executeSaveAttachment(
 	ctx: OrchestratorContext,
 	deps: ExecutorDeps,
 ) {
+	console.log(`[executeSaveAttachment] emailId=${ctx.email.id}`);
+
 	const attachments = deps.db
 		.select()
 		.from(schema.attachments)
 		.where(eq(schema.attachments.email_id, ctx.email.id))
 		.all();
 
-	if (attachments.length === 0) return;
+	console.log(`[executeSaveAttachment] found ${attachments.length} attachments in DB`);
+
+	if (attachments.length === 0) {
+		console.warn("[executeSaveAttachment] no attachments found — nothing to save");
+		return;
+	}
 
 	for (const att of attachments) {
 		try {
 			const sourceKey = `attachments/${ctx.email.id}/${att.id}/${att.filename}`;
+			console.log(`[executeSaveAttachment] reading R2 key: ${sourceKey}`);
 			const obj = await deps.env.BUCKET.get(sourceKey);
-			if (!obj) continue;
+			if (!obj) {
+				console.warn(`[executeSaveAttachment] R2 object not found: ${sourceKey}`);
+				continue;
+			}
 
 			// Stream the body into a Uint8Array
 			const chunks: Uint8Array[] = [];
@@ -114,9 +125,11 @@ async function executeSaveAttachment(
 
 			const driveFileId = crypto.randomUUID();
 			const driveKey = `drive/${driveFileId}/${att.filename}`;
+			console.log(`[executeSaveAttachment] writing R2 key: ${driveKey}`);
 			await deps.env.BUCKET.put(driveKey, blob);
 
 			// Insert drive file record
+			console.log(`[executeSaveAttachment] inserting drive_files row: id=${driveFileId}`);
 			deps.db.insert(schema.driveFiles).values({
 				id: driveFileId,
 				email_id: ctx.email.id,
@@ -125,8 +138,9 @@ async function executeSaveAttachment(
 				size: att.size,
 				r2_key: driveKey,
 			}).run();
+			console.log(`[executeSaveAttachment] successfully saved attachment ${att.id} as drive file ${driveFileId}`);
 		} catch (e) {
-			console.warn(`Failed to save attachment ${att.id} to drive:`, (e as Error).message);
+			console.warn(`[executeSaveAttachment] failed to save attachment ${att.id}:`, (e as Error).message);
 			throw e;
 		}
 	}

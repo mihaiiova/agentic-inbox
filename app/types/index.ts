@@ -96,6 +96,7 @@ export interface RuleLog {
 	id: string;
 	email_id: string;
 	rule_id: string | null;
+	rule_name: string | null;
 	rule_type: string;
 	action_type: string;
 	status: string;

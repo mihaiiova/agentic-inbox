@@ -5,7 +5,14 @@
 	"compatibility_date": "2025-11-28",
 	"main": "./workers/app.ts",
 	"observability": {
-		"enabled": true
+		"enabled": true,
+		"logs": {
+			"enabled": true,
+			"invocation_logs": true
+		},
+		"traces": {
+			"enabled": false
+		}
 	},
 	"compatibility_flags": [
 		"nodejs_compat"
