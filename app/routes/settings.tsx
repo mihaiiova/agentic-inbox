@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { Badge, Button, Dialog, Input, Loader, Select, useKumoToastManager } from "@cloudflare/kumo";
-import { RobotIcon, ArrowCounterClockwiseIcon, PlusIcon, TagIcon, TrashIcon, FadersIcon, PencilSimpleIcon, XIcon, BellIcon, ScrollIcon } from "@phosphor-icons/react";
+import { RobotIcon, ArrowCounterClockwiseIcon, PlusIcon, TagIcon, TrashIcon, FadersIcon, PencilSimpleIcon, XIcon, BellIcon, ScrollIcon, CheckIcon, CopyIcon, PlugsIcon, WrenchIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { useMailbox, useUpdateMailbox } from "~/queries/mailboxes";
@@ -86,6 +86,111 @@ function StatusBadge({ status }: { status: string }) {
 	};
 	const config = variants[status] || { variant: "secondary", label: status };
 	return <Badge variant={config.variant as any}>{config.label}</Badge>;
+}
+
+function CopyButton({ text }: { text: string }) {
+	const [copied, setCopied] = useState(false);
+
+	const handleCopy = async () => {
+		try {
+			await navigator.clipboard.writeText(text);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		} catch {
+			// Clipboard API unavailable or permission denied — ignore silently
+		}
+	};
+
+	return (
+		<Button
+			variant="ghost"
+			shape="square"
+			size="sm"
+			icon={
+				copied ? (
+					<CheckIcon size={12} weight="bold" className="text-kumo-success" />
+				) : (
+					<CopyIcon size={12} />
+				)
+			}
+			onClick={handleCopy}
+			aria-label="Copy to clipboard"
+		/>
+	);
+}
+
+const MCP_TOOLS = [
+	{ name: "list_mailboxes", desc: "List all mailboxes" },
+	{ name: "list_emails", desc: "List emails in a folder" },
+	{ name: "get_email", desc: "Read a full email with body" },
+	{ name: "get_thread", desc: "Load a conversation thread" },
+	{ name: "search_emails", desc: "Search emails by query" },
+	{ name: "draft_reply", desc: "Draft a reply to an email" },
+	{ name: "send_reply", desc: "Send a reply" },
+	{ name: "send_email", desc: "Send a new email" },
+	{ name: "mark_email_read", desc: "Mark email as read/unread" },
+	{ name: "move_email", desc: "Move email to a folder" },
+	{ name: "list_drive_files", desc: "List drive files" },
+	{ name: "get_drive_file", desc: "Get drive file metadata" },
+	{ name: "delete_drive_file", desc: "Delete a drive file" },
+];
+
+function MCPSection() {
+	const baseUrl =
+		typeof window !== "undefined" ? window.location.origin : "https://your-app.workers.dev";
+	const mcpUrl = `${baseUrl}/mcp`;
+
+	return (
+		<div className="space-y-4">
+			<p className="text-xs text-kumo-subtle leading-relaxed">
+				This email agent exposes an MCP server so AI coding assistants can manage
+				your inbox directly — read emails, search, draft replies, and send messages
+				using natural language.
+			</p>
+
+			<div className="space-y-1.5">
+				<label className="text-xs font-medium text-kumo-strong block">
+					Server URL
+				</label>
+				<div className="relative group">
+					<div className="absolute right-1.5 top-1/2 -translate-y-1/2">
+						<CopyButton text={mcpUrl} />
+					</div>
+					<div className="bg-kumo-recessed text-kumo-default font-mono text-[11px] px-3 py-2.5 pr-10 rounded-lg border border-kumo-line break-all leading-relaxed">
+						{mcpUrl}
+					</div>
+				</div>
+			</div>
+
+			<div className="space-y-2">
+				<h4 className="text-xs uppercase tracking-wider font-semibold text-kumo-subtle px-0.5">
+					Available Tools
+				</h4>
+				<div className="border border-kumo-line rounded-lg divide-y divide-kumo-line">
+					{MCP_TOOLS.map((tool) => (
+						<div
+							key={tool.name}
+							className="flex items-center gap-2.5 px-3 py-2"
+						>
+							<WrenchIcon
+								size={12}
+								weight="bold"
+								className="text-kumo-brand shrink-0"
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="text-xs font-mono font-medium text-kumo-default">
+									{tool.name}
+								</span>
+							</div>
+							<span className="text-[11px] text-kumo-subtle shrink-0">
+								{tool.desc}
+							</span>
+						</div>
+					))}
+				</div>
+			</div>
+		</div>
+	);
 }
 
 function RuleLogsSection({ mailboxId }: { mailboxId: string | undefined }) {
@@ -685,13 +790,22 @@ export default function SettingsRoute() {
 					</div>
 				</div>
 
-				{/* Save */}
-				<div className="flex justify-end">
-					<Button variant="primary" onClick={handleSave} loading={isSaving}>
-						Save Changes
-					</Button>
+			{/* MCP Server */}
+			<div className="rounded-lg border border-kumo-line bg-kumo-base p-5">
+				<div className="flex items-center gap-2 mb-4">
+					<PlugsIcon size={16} className="text-kumo-subtle" />
+					<span className="text-sm font-medium text-kumo-default">MCP Server</span>
 				</div>
+				<MCPSection />
 			</div>
+
+			{/* Save */}
+			<div className="flex justify-end">
+				<Button variant="primary" onClick={handleSave} loading={isSaving}>
+					Save Changes
+				</Button>
+			</div>
+		</div>
 
 			{/* Label Dialog */}
 			<Dialog.Root open={isLabelDialogOpen} onOpenChange={setIsLabelDialogOpen}>

@@ -26,21 +26,6 @@ interface UIState {
 
 	// Compose options
 	composeOptions: ComposeOptions;
-
-	// Mobile sidebar
-	isSidebarOpen: boolean;
-	openSidebar: () => void;
-	closeSidebar: () => void;
-	toggleSidebar: () => void;
-
-	// Agent panel
-	isAgentPanelOpen: boolean;
-	toggleAgentPanel: () => void;
-
-	// Legacy dialog support (kept for non-split views)
-	isComposeModalOpen: boolean;
-	openComposeModal: (options?: ComposeOptions) => void;
-	closeComposeModal: () => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -48,9 +33,6 @@ export const useUIStore = create<UIState>((set, get) => ({
 	isComposing: false,
 	_previousEmailId: null,
 	composeOptions: { mode: "new", originalEmail: null },
-	isComposeModalOpen: false,
-	isSidebarOpen: false,
-	isAgentPanelOpen: true,
 
 	selectEmail: (id) => set({ selectedEmailId: id, isComposing: false }),
 
@@ -64,11 +46,16 @@ export const useUIStore = create<UIState>((set, get) => ({
 				// Keep selectedEmailId when replying/forwarding so the thread stays visible
 				selectedEmailId: isReplyOrForward ? state.selectedEmailId : null,
 				composeOptions: options || { mode: "new", originalEmail: null },
-				isSidebarOpen: false,
 			};
 		}),
 
-	closePanel: () => set({ selectedEmailId: null, isComposing: false, _previousEmailId: null, composeOptions: { mode: "new" as const, originalEmail: null } }),
+	closePanel: () =>
+		set({
+			selectedEmailId: null,
+			isComposing: false,
+			_previousEmailId: null,
+			composeOptions: { mode: "new" as const, originalEmail: null },
+		}),
 
 	closeCompose: () =>
 		set((state) => ({
@@ -77,22 +64,4 @@ export const useUIStore = create<UIState>((set, get) => ({
 			_previousEmailId: null,
 			composeOptions: { mode: "new" as const, originalEmail: null },
 		})),
-
-	openSidebar: () => set({ isSidebarOpen: true }),
-	closeSidebar: () => set({ isSidebarOpen: false }),
-	toggleSidebar: () => set({ isSidebarOpen: !get().isSidebarOpen }),
-
-	toggleAgentPanel: () => set({ isAgentPanelOpen: !get().isAgentPanelOpen }),
-
-	openComposeModal: (options) =>
-		set({
-			composeOptions: options || { mode: "new", originalEmail: null },
-			isComposeModalOpen: true,
-		}),
-
-	closeComposeModal: () =>
-		set({
-			isComposeModalOpen: false,
-			composeOptions: { mode: "new", originalEmail: null },
-		}),
 }));
