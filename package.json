@@ -22,6 +22,7 @@
 		"cf-typegen": "wrangler types",
 		"deploy": "npm run build && wrangler deploy",
 		"dev": "react-router dev",
+		"dev:local": "./scripts/start-dev.sh",
 		"preview": "npm run build && vite preview",
 		"test": "vitest run",
 		"test:watch": "vitest",
