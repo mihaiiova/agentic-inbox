@@ -544,7 +544,7 @@ export default function SettingsRoute() {
 	const isCustomPrompt = agentPrompt.trim().length > 0;
 
 	return (
-		<div className="max-w-2xl px-4 py-4 md:px-8 md:py-6 h-full overflow-y-auto">
+		<div className="w-full px-4 py-4 md:px-8 md:py-6 h-full overflow-y-auto">
 			<h1 className="text-lg font-semibold text-kumo-default mb-6">Settings</h1>
 
 			<div className="space-y-6">

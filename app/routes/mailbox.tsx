@@ -29,7 +29,7 @@ export default function MailboxRoute() {
 				</div>
 
 				{/* Main content */}
-				<main className="flex-1 overflow-y-auto">
+				<main className="flex-1 flex flex-col overflow-y-auto">
 					<Outlet />
 				</main>
 
