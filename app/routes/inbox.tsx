@@ -449,9 +449,9 @@ export default function InboxRoute() {
 	return (
 		<div className="flex flex-col min-h-full">
 			{/* Search + Folder bar */}
-			<div className="sticky top-0 z-10 bg-kumo-base border-b border-kumo-line px-4 py-3 space-y-2.5">
-				{/* Identity row */}
-				<div className="flex items-center justify-between">
+			<div className="sticky top-0 bg-kumo-base border-b border-kumo-line px-4 py-3 space-y-2.5">
+				{/* Identity row — mobile only */}
+				<div className="flex md:hidden items-center justify-between">
 					<div className="min-w-0">
 						<div className="text-sm font-semibold text-kumo-default truncate">
 							{currentMailbox?.settings?.fromName || currentMailbox?.name || mailboxId?.split("@")[0]}
@@ -460,6 +460,42 @@ export default function InboxRoute() {
 							{currentMailbox?.email || mailboxId}
 						</div>
 					</div>
+				</div>
+
+				{/* Search + Refresh + Folder row */}
+				<div className="flex items-center gap-2">
+				<Select
+					value={selectValue}
+					onValueChange={handleFolderChange}
+					renderValue={(value) => {
+						const opt = folderOptions.find((o) => o.value === (value as string));
+						return opt ? opt.label : String(value);
+					}}
+				>
+					{folderOptions.map((opt) => (
+						<Select.Option key={opt.value} value={opt.value}>
+							<div className="flex items-center gap-2">
+								{opt.icon}
+								<span>{opt.label}</span>
+							</div>
+						</Select.Option>
+					))}
+				</Select>
+					<Input
+						className="flex-1 min-w-0"
+						placeholder="Search emails..."
+						value={searchQuery}
+						onChange={(e) => setSearchQuery(e.target.value)}
+						onKeyDown={handleKeyDown}
+					/>
+					<Button
+						variant="ghost"
+						shape="square"
+						size="sm"
+						icon={<MagnifyingGlassIcon size={16} />}
+						onClick={handleSearch}
+						aria-label="Search"
+					/>
 					<Tooltip content={isRefreshing ? "Refreshing..." : "Refresh"} side="bottom" asChild>
 						<Button
 							variant="ghost"
@@ -477,37 +513,6 @@ export default function InboxRoute() {
 						/>
 					</Tooltip>
 				</div>
-
-				{/* Search */}
-				<div className="flex items-center gap-2">
-					<Input
-						className="flex-1"
-						placeholder="Search emails..."
-						value={searchQuery}
-						onChange={(e) => setSearchQuery(e.target.value)}
-						onKeyDown={handleKeyDown}
-					/>
-					<Button
-						variant="ghost"
-						shape="square"
-						size="sm"
-						icon={<MagnifyingGlassIcon size={16} />}
-						onClick={handleSearch}
-						aria-label="Search"
-					/>
-				</div>
-
-				{/* Folder select */}
-				<Select value={selectValue} onValueChange={handleFolderChange}>
-					{folderOptions.map((opt) => (
-						<Select.Option key={opt.value} value={opt.value}>
-							<div className="flex items-center gap-2">
-								{opt.icon}
-								<span>{opt.label}</span>
-							</div>
-						</Select.Option>
-					))}
-				</Select>
 			</div>
 
 			{/* Content */}
