@@ -159,6 +159,9 @@ async function executeSendNotification(
 		return;
 	}
 
+	const baseUrl = deps.env.APP_BASE_URL;
+	const emailUrl = baseUrl ? `${baseUrl}/mailbox/${ctx.mailboxId}/email/${ctx.email.id}` : undefined;
+
 	const result = await sendPushoverNotification(
 		deps.env,
 		userKey,
@@ -167,6 +170,8 @@ async function executeSendNotification(
 			title: action.params.title,
 			message: action.params.message,
 			priority: action.params.priority,
+			url: emailUrl,
+			url_title: "Open in Inbox",
 		},
 	);
 

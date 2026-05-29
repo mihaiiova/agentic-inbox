@@ -436,7 +436,12 @@ app.post("/api/v1/mailboxes/:mailboxId/test-notification", async (c: AppContext)
 		c.env,
 		userKey,
 		{ subject: "Agentic Inbox — Test Notification", sender: "Agentic Inbox" },
-		{ title: "Test Notification", message: "This is a test notification from Agentic Inbox. If you see this, Pushover is configured correctly!" },
+		{
+			title: "Test Notification",
+			message: "This is a test notification from Agentic Inbox. If you see this, Pushover is configured correctly!",
+			url: c.env.APP_BASE_URL || undefined,
+			url_title: "Open Inbox",
+		},
 	);
 	return c.json(result, result.success ? 200 : 500);
 });

@@ -9,4 +9,7 @@ export interface Env extends Cloudflare.Env {
 	AI_GATEWAY_ID?: string;
 	AI_GATEWAY_TOKEN?: string;
 	AI_GATEWAY_ENDPOINT?: string;
+	APP_BASE_URL?: string;
+	DOMAINS?: string;
+	EMAIL_ADDRESSES?: string[];
 }

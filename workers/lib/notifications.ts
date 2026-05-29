@@ -16,6 +16,8 @@ interface PushoverPayload {
 	title?: string;
 	message: string;
 	priority?: number;
+	url?: string;
+	url_title?: string;
 }
 
 interface NotificationEmail {
@@ -40,6 +42,8 @@ export async function sendPushoverNotification(
 		title?: string;
 		message?: string;
 		priority?: number;
+		url?: string;
+		url_title?: string;
 	},
 ): Promise<{ success: boolean; error?: string }> {
 	const appToken = env.PUSHOVER_APP_TOKEN;
@@ -63,6 +67,11 @@ export async function sendPushoverNotification(
 
 	if (priority !== 0) {
 		payload.priority = priority;
+	}
+
+	if (overrides?.url) {
+		payload.url = overrides.url;
+		payload.url_title = overrides.url_title || "View";
 	}
 
 	try {
