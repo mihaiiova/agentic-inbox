@@ -109,6 +109,8 @@ const api = {
 		put<Mailbox>(`/api/v1/mailboxes/${mailboxId}`, { settings }),
 	deleteMailbox: (mailboxId: string) =>
 		del<void>(`/api/v1/mailboxes/${mailboxId}`),
+	testNotification: (mailboxId: string) =>
+		post<{ success: boolean; error?: string }>(`/api/v1/mailboxes/${mailboxId}/test-notification`),
 
 	// Emails
 	listEmails: (mailboxId: string, params: Record<string, string>, opts?: { signal?: AbortSignal }) =>

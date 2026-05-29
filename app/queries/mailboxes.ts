@@ -59,3 +59,9 @@ export function useDeleteMailbox() {
 		},
 	});
 }
+
+export function useTestNotification() {
+	return useMutation({
+		mutationFn: (mailboxId: string) => api.testNotification(mailboxId),
+	});
+}

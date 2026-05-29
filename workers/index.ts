@@ -20,6 +20,7 @@ import { handleReplyEmail, handleForwardEmail } from "./routes/reply-forward";
 import { Folders } from "../shared/folders";
 import type { Env } from "./types";
 import { requireMailbox, type MailboxContext } from "./lib/mailbox";
+import { sendPushoverNotification, getMailboxPushoverKey } from "./lib/notifications";
 
 type AppContext = Context<MailboxContext>;
 
@@ -423,6 +424,21 @@ app.get("/api/v1/mailboxes/:mailboxId/rule-logs", async (c: AppContext) => {
 	const stub = c.var.mailboxStub as any;
 	const logs = await stub.getRuleLogs(limit, (page - 1) * limit);
 	return c.json(logs);
+});
+
+app.post("/api/v1/mailboxes/:mailboxId/test-notification", async (c: AppContext) => {
+	const mailboxId = c.req.param("mailboxId");
+	const userKey = await getMailboxPushoverKey(c.env, mailboxId);
+	if (!userKey) {
+		return c.json({ success: false, error: "Pushover user key not configured. Save your Pushover User Key first." }, 400);
+	}
+	const result = await sendPushoverNotification(
+		c.env,
+		userKey,
+		{ subject: "Agentic Inbox — Test Notification", sender: "Agentic Inbox" },
+		{ title: "Test Notification", message: "This is a test notification from Agentic Inbox. If you see this, Pushover is configured correctly!" },
+	);
+	return c.json(result, result.success ? 200 : 500);
 });
 
 // -- Drive ----------------------------------------------------------

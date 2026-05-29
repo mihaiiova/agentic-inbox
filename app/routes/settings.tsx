@@ -6,7 +6,7 @@ import { Badge, Button, Dialog, Input, Loader, Select, useKumoToastManager } fro
 import { RobotIcon, ArrowCounterClockwiseIcon, PlusIcon, TagIcon, TrashIcon, FadersIcon, PencilSimpleIcon, XIcon, BellIcon, ScrollIcon, CheckIcon, CopyIcon, PlugsIcon, WrenchIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { useMailbox, useUpdateMailbox } from "~/queries/mailboxes";
+import { useMailbox, useUpdateMailbox, useTestNotification } from "~/queries/mailboxes";
 import { useLabels, useCreateLabel, useDeleteLabel } from "~/queries/labels";
 import { useRules, useCreateRule, useUpdateRule, useDeleteRule, useRuleLogs } from "~/queries/rules";
 import { formatDetailDate } from "../../shared/dates";
@@ -295,6 +295,7 @@ export default function SettingsRoute() {
 	const toastManager = useKumoToastManager();
 	const { data: mailbox } = useMailbox(mailboxId);
 	const updateMailboxMutation = useUpdateMailbox();
+	const testNotificationMutation = useTestNotification();
 
 	const { data: labels = [] } = useLabels(mailboxId);
 	const createLabelMutation = useCreateLabel();
@@ -365,6 +366,26 @@ export default function SettingsRoute() {
 
 	const handleResetPrompt = () => {
 		setAgentPrompt("");
+	};
+
+	const handleTestNotification = async () => {
+		if (!mailboxId) return;
+		try {
+			const result = await testNotificationMutation.mutateAsync(mailboxId);
+			if (result.success) {
+				toastManager.add({ title: "Test notification sent! Check your Pushover device." });
+			} else {
+				toastManager.add({
+					title: result.error || "Test notification failed",
+					variant: "error",
+				});
+			}
+		} catch {
+			toastManager.add({
+				title: "Failed to send test notification",
+				variant: "error",
+			});
+		}
 	};
 
 	const handleCreateLabel = async (e: React.FormEvent) => {
@@ -776,6 +797,15 @@ export default function SettingsRoute() {
 							value={pushoverUserKey}
 							onChange={(e) => setPushoverUserKey(e.target.value)}
 						/>
+						<Button
+							variant="secondary"
+							size="sm"
+							icon={<BellIcon size={14} />}
+							onClick={handleTestNotification}
+							loading={testNotificationMutation.isPending}
+						>
+							Send Test Notification
+						</Button>
 						<p className="text-xs text-kumo-subtle">
 							Used by rules with the &quot;Send Pushover notification&quot; action.
 							<a
