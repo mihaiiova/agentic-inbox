@@ -4,7 +4,7 @@
 
 import { eq } from "drizzle-orm";
 import * as schema from "../db/schema";
-import { sendPushoverNotification, getMailboxPushoverKey } from "../lib/notifications";
+import { sendPushoverNotification } from "../lib/notifications";
 import type { Plan, Action } from "./plan";
 import type { OrchestratorContext } from "./context";
 
@@ -151,7 +151,9 @@ async function executeSendNotification(
 	ctx: OrchestratorContext,
 	deps: ExecutorDeps,
 ) {
-	const userKey = (await getMailboxPushoverKey(deps.env, ctx.mailboxId)) || undefined;
+	const userKey = typeof ctx.mailboxSettings.pushoverUserKey === "string"
+		? ctx.mailboxSettings.pushoverUserKey.trim()
+		: undefined;
 	if (!userKey) {
 		console.warn("Skipping notification: no Pushover user key configured");
 		return;
