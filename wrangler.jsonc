@@ -17,13 +17,8 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	"vars": {
-		// Production deploys must also define POLICY_AUD and TEAM_DOMAIN.
-		// TEAM_DOMAIN may be the base Access URL or the full /cdn-cgi/access/certs URL.
-		// The worker now fails closed outside local development if Access is not configured.
-		"DOMAINS": "iova.cloud, briefora.xyz",
-		"EMAIL_ADDRESSES": []
-	},
+	// Per-deployment variables (DOMAINS, EMAIL_ADDRESSES, APP_BASE_URL) should be set
+	// via the Cloudflare dashboard or wrangler CLI (--var flag), not in this file.
 	"send_email": [
 		{
 			"name": "EMAIL",

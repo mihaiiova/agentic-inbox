@@ -2,6 +2,18 @@
 POLICY_AUD=your-access-policy-audience-tag
 TEAM_DOMAIN=https://your-team.cloudflareaccess.com
 
+# Email domains handled by this worker (comma-separated). Used by the email routing handler.
+# Example: DOMAINS=example.com,another-example.com
+DOMAINS=your-domain.com
+
+# Allowed email addresses for inbound mail (JSON array). Leave empty to allow all addresses on the above domains.
+# Example: EMAIL_ADDRESSES=["hello@example.com","support@example.com"]
+EMAIL_ADDRESSES=[]
+
+# Public URL of your deployed worker. Used for clickable links in Pushover notifications.
+# Example: APP_BASE_URL=https://agentic-inbox.your-account.workers.dev
+APP_BASE_URL=https://your-worker-name.your-account.workers.dev
+
 # Pushover (optional). Required to send push notifications via rules or the test button in Settings.
 # Create a Pushover application at https://pushover.net/apps/build to get your token.
 PUSHOVER_APP_TOKEN=your-pushover-app-token
