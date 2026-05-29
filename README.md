@@ -56,11 +56,11 @@ Watch the setup video: [https://www.youtube.com/watch?v=Bf_cEzAIUPU](https://www
 
 ### To set up
 
-1. Deploy to Cloudflare. The deploy flow will automatically provision R2, Durable Objects, and Workers AI.
+1. Clone and deploy to Cloudflare. The deploy flow will automatically provision R2, Durable Objects, and Workers AI.
 
      [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/agentic-inbox)
 
-     After deploying, set the per-deployment variables in your Worker settings (Dashboard > Workers & Pages > your-worker > Settings > Variables):
+     After deploying, copy `wrangler.jsonc.example` to `wrangler.jsonc` and update the vars:
      - `DOMAINS` — the domain(s) you want to receive emails for (e.g. `example.com`)
      - `EMAIL_ADDRESSES` — allowed inbound addresses as a JSON array, or `[]` for all addresses on the configured domains
      - `APP_BASE_URL` — your worker's public URL (e.g. `https://agentic-inbox.your-account.workers.dev`)
@@ -86,7 +86,7 @@ npm run dev
 
 ### Configuration
 
-1. Set per-deployment variables via the Cloudflare dashboard (Settings > Variables) or `wrangler deploy --var KEY:value`:
+1. Copy `wrangler.jsonc.example` to `wrangler.jsonc` and update the vars for your deployment:
    - `DOMAINS` — comma-separated list of domains you want to receive emails for (e.g. `example.com,another.com`)
    - `EMAIL_ADDRESSES` — JSON array of allowed inbound addresses (e.g. `["hello@example.com"]`), or `[]` to allow all addresses on the configured domains
    - `APP_BASE_URL` — public URL of your deployed worker (e.g. `https://agentic-inbox.your-account.workers.dev`), used for clickable links in Pushover notifications

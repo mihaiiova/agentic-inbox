@@ -1,7 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "agentic-inbox",
-	"account_id": "ba9bb449e270ff0b4a8de56a8903f598",
+	"account_id": "your-cloudflare-account-id",
 	"compatibility_date": "2025-11-28",
 	"main": "./workers/app.ts",
 	"observability": {
@@ -17,8 +17,19 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	// Per-deployment variables (DOMAINS, EMAIL_ADDRESSES, APP_BASE_URL) should be set
-	// via the Cloudflare dashboard or wrangler CLI (--var flag), not in this file.
+	"vars": {
+		// Comma-separated list of domains you want to receive emails for.
+		// Example: "example.com,another-example.com"
+		"DOMAINS": "example.com",
+
+		// JSON array of allowed inbound email addresses.
+		// Leave empty "[]" to accept mail for all addresses on the configured DOMAINS.
+		"EMAIL_ADDRESSES": [],
+
+		// Public URL of your deployed worker. Used for clickable links in
+		// Pushover notifications. Example: "https://your-worker.your-account.workers.dev"
+		"APP_BASE_URL": "https://your-worker.your-account.workers.dev"
+	},
 	"send_email": [
 		{
 			"name": "EMAIL",
