@@ -17,7 +17,6 @@ import {
 	PencilSimpleIcon,
 	StarIcon,
 	TrashIcon,
-	XIcon,
 } from "@phosphor-icons/react";
 import type { Folder, Email } from "~/types";
 
@@ -68,8 +67,10 @@ export default function EmailPanelToolbar({
 				icon={<ArrowLeftIcon size={18} />}
 				onClick={onBack}
 				aria-label="Back to list"
-				className="md:hidden shrink-0"
+				className="shrink-0"
 			/>
+
+			<div className="h-5 w-px bg-kumo-fill mx-0.5" />
 
 			{isDraftFolder ? (
 				<>
@@ -177,17 +178,6 @@ export default function EmailPanelToolbar({
 						icon={<TrashIcon size={18} />}
 						onClick={onDelete}
 						aria-label="Delete"
-					/>
-				</Tooltip>
-				<Tooltip content="Close" side="bottom" asChild>
-					<Button
-						variant="ghost"
-						shape="square"
-						size="sm"
-						icon={<XIcon size={18} />}
-						onClick={onBack}
-						aria-label="Close"
-						className="hidden md:inline-flex"
 					/>
 				</Tooltip>
 			</div>

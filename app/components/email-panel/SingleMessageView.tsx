@@ -39,7 +39,11 @@ export default function SingleMessageView({
 				</div>
 			</div>
 
-			<div className="flex-1 min-h-0">
+			<h2 className="text-base font-semibold text-kumo-default px-4 py-3 border-b border-kumo-line shrink-0 md:px-6">
+				{email.subject}
+			</h2>
+
+			<div className="flex-1 min-h-0 h-screen">
 				<EmailIframe
 					body={rewriteInlineImages(
 						email.body || "",

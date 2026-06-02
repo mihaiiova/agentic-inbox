@@ -7,7 +7,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import { Folders } from "shared/folders";
 import EmailPanelDialogs from "~/components/email-panel/EmailPanelDialogs";
-import EmailPanelHeader from "~/components/email-panel/EmailPanelHeader";
 import EmailPanelToolbar from "~/components/email-panel/EmailPanelToolbar";
 import SingleMessageView from "~/components/email-panel/SingleMessageView";
 import ThreadMessage from "~/components/email-panel/ThreadMessage";
@@ -173,13 +172,6 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
 				onMove={handleMove}
 				onViewSource={() => setSourceViewEmail(email)}
 				onDelete={handleDelete}
-			/>
-
-			<EmailPanelHeader
-				subject={email.subject}
-				messageCount={allMessages.length}
-				showThreadCount={hasThread}
-				labels={email.labels}
 			/>
 
 			<div className="flex-1 overflow-y-auto">

@@ -156,6 +156,10 @@ export default function ThreadMessage({
 					</div>
 				</div>
 
+				<h3 className="text-sm font-semibold text-kumo-default mb-3 md:ml-[42px]">
+					{email.subject}
+				</h3>
+
 				<div className="md:ml-[42px]">
 					<EmailIframe
 						body={rewriteInlineImages(
