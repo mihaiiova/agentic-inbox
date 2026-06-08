@@ -20,7 +20,7 @@
 	"scripts": {
 		"build": "react-router build",
 		"cf-typegen": "wrangler types",
-		"deploy": "npm run build && wrangler deploy",
+		"deploy": "npm run build && wrangler deploy --keep-vars",
 		"dev": "react-router dev",
 		"dev:local": "./scripts/start-dev.sh",
 		"preview": "npm run build && vite preview",
