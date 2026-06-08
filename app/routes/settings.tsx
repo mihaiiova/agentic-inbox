@@ -7,6 +7,7 @@ import { RobotIcon, ArrowCounterClockwiseIcon, PlusIcon, TagIcon, TrashIcon, Fad
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { useMailbox, useUpdateMailbox, useTestNotification } from "~/queries/mailboxes";
+import { ApiError } from "~/services/api";
 import { useLabels, useCreateLabel, useDeleteLabel } from "~/queries/labels";
 import { useRules, useCreateRule, useUpdateRule, useDeleteRule, useRuleLogs } from "~/queries/rules";
 import { formatDetailDate } from "../../shared/dates";
@@ -380,9 +381,12 @@ export default function SettingsRoute() {
 					variant: "error",
 				});
 			}
-		} catch {
+		} catch (e) {
+			const error = e instanceof ApiError
+				? (e.body.error as string) || "Failed to send test notification"
+				: "Failed to send test notification";
 			toastManager.add({
-				title: "Failed to send test notification",
+				title: error,
 				variant: "error",
 			});
 		}
@@ -463,10 +467,9 @@ export default function SettingsRoute() {
 	const handleSaveRule = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!mailboxId || !ruleName.trim()) return;
-		if (ruleType === "static" && ruleConditions.some((c) => !c.value.trim())) {
-			toastManager.add({ title: "All conditions must have a value", variant: "error" });
-			return;
-		}
+		const validConditions = ruleType === "static"
+			? ruleConditions.filter((c) => c.value.trim())
+			: [];
 		if (ruleType === "agent" && !ruleAgentPrompt.trim()) {
 			toastManager.add({ title: "Agent prompt is required", variant: "error" });
 			return;
@@ -494,7 +497,7 @@ export default function SettingsRoute() {
 						type: ruleType,
 						enabled: ruleEnabled,
 						match_all: ruleMatchAll,
-						conditions: ruleConditions,
+						conditions: validConditions,
 						agent_prompt: ruleAgentPrompt,
 						action_type: ruleActionType,
 						action_params: actionParams,
@@ -509,7 +512,7 @@ export default function SettingsRoute() {
 						type: ruleType,
 						enabled: ruleEnabled,
 						match_all: ruleMatchAll,
-						conditions: ruleConditions,
+						conditions: validConditions,
 						agent_prompt: ruleAgentPrompt,
 						action_type: ruleActionType,
 						action_params: actionParams,
@@ -651,10 +654,14 @@ export default function SettingsRoute() {
 								let conditionsText = "";
 								let actionText = "";
 								try {
-									const conds = JSON.parse(rule.conditions) as RuleCondition[];
-									conditionsText = conds
-										.map((c) => c.operator === "classification" ? `AI: "${c.value}"` : `${c.field} ${c.operator} "${c.value}"`)
-										.join(rule.match_all ? " AND " : " OR ");
+											const conds = JSON.parse(rule.conditions) as RuleCondition[];
+											if (conds.length === 0) {
+												conditionsText = "All emails";
+											} else {
+												conditionsText = conds
+													.map((c) => c.operator === "classification" ? `AI: "${c.value}"` : `${c.field} ${c.operator} "${c.value}"`)
+													.join(rule.match_all ? " AND " : " OR ");
+											}
 								} catch {
 									conditionsText = "Invalid conditions";
 								}
@@ -937,6 +944,11 @@ export default function SettingsRoute() {
 							<div>
 								<div className="text-sm font-medium text-kumo-default mb-2">Conditions</div>
 								<div className="space-y-2">
+									{ruleConditions.length === 0 && (
+										<p className="text-xs text-kumo-subtle">
+											No conditions — this rule will match all emails.
+										</p>
+									)}
 									{ruleConditions.map((condition, index) => (
 										<div key={index} className="flex items-center gap-2">
 											<Select
@@ -971,16 +983,14 @@ export default function SettingsRoute() {
 												}
 												className="flex-1"
 											/>
-											{ruleConditions.length > 1 && (
-												<Button
-													variant="ghost"
-													shape="square"
-													size="sm"
-													icon={<XIcon size={14} />}
-													onClick={() => removeCondition(index)}
-													aria-label="Remove condition"
-												/>
-											)}
+											<Button
+												variant="ghost"
+												shape="square"
+												size="sm"
+												icon={<XIcon size={14} />}
+												onClick={() => removeCondition(index)}
+												aria-label="Remove condition"
+											/>
 										</div>
 									))}
 								</div>

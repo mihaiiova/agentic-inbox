@@ -369,9 +369,7 @@ app.post("/api/v1/mailboxes/:mailboxId/rules", async (c: AppContext) => {
 	if (!body.action_type) return c.json({ error: "Action type is required" }, 400);
 
 	const ruleType = body.type || "static";
-	if (ruleType === "static") {
-		if (!body.conditions?.length) return c.json({ error: "At least one condition is required for static rules" }, 400);
-	} else if (ruleType === "agent") {
+	if (ruleType === "agent") {
 		if (!body.agent_prompt?.trim()) return c.json({ error: "Agent prompt is required for agent rules" }, 400);
 	}
 
