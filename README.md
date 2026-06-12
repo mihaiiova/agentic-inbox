@@ -65,7 +65,12 @@ Watch the setup video: [https://www.youtube.com/watch?v=Bf_cEzAIUPU](https://www
      - `EMAIL_ADDRESSES` — allowed inbound addresses as a JSON array, or `[]` for all addresses on the configured domains
      - `APP_BASE_URL` — your worker's public URL (e.g. `https://agentic-inbox.your-account.workers.dev`)
 
-2. **Configure Cloudflare Access** — Enable [one-click Cloudflare Access](https://developers.cloudflare.com/changelog/post/2025-10-03-one-click-access-for-workers/) on your Worker under Settings > Domains & Routes. The modal will show your `POLICY_AUD` and `TEAM_DOMAIN` values. `TEAM_DOMAIN` can be either your Access team URL or the full `.../cdn-cgi/access/certs` URL. **You must set these as secrets for your Worker.**
+2. **Configure Cloudflare Access** — The app requires Cloudflare Access in production to protect your inbox. Follow the official [Cloudflare Access documentation](https://developers.cloudflare.com/cloudflare-one/policies/access/) to set it up. For Workers, the easiest way is to enable [one-click Cloudflare Access](https://developers.cloudflare.com/changelog/post/2025-10-03-one-click-access-for-workers/) on your Worker under **Settings > Domains & Routes**. The modal will show your `POLICY_AUD` and `TEAM_DOMAIN` values. `TEAM_DOMAIN` can be either your Access team URL or the full `.../cdn-cgi/access/certs` URL. **You must set these as secrets for your Worker:**
+   ```bash
+   wrangler secret put POLICY_AUD
+   wrangler secret put TEAM_DOMAIN
+   ```
+   See the [Cloudflare Access for Workers guide](https://developers.cloudflare.com/cloudflare-one/policies/access/) for more details.
 3. **Set up Email Routing** — In the Cloudflare dashboard, go to your domain > Email Routing and create a catch-all rule that forwards to this Worker
 4. **Enable Email Service** — The worker needs the `send_email` binding to send outbound emails. See [Email Service docs](https://developers.cloudflare.com/email-routing/email-workers/send-email-workers/)
 5. **Create a mailbox** — Visit your deployed app and create a mailbox for any address on your domain (e.g. `hello@example.com`)
@@ -104,7 +109,7 @@ npm run deploy
 - [Email Routing](https://developers.cloudflare.com/email-routing/) enabled for receiving
 - [Email Service](https://developers.cloudflare.com/email-service/) enabled for sending
 - [Workers AI](https://developers.cloudflare.com/workers-ai/) enabled (for the agent)
-- [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) configured for deployed/shared environments (required in production)
+- [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) configured for deployed/shared environments (required in production) — see the [Access for Workers guide](https://developers.cloudflare.com/cloudflare-one/policies/access/)
 
 ## License
 
