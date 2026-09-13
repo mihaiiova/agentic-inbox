@@ -19,6 +19,14 @@ export interface StoredAttachment {
 }
 
 /**
+ * Build the R2 object key for an attachment. Attachment metadata is kept in
+ * the mailbox Durable Object while the object itself is kept in R2.
+ */
+export function attachmentKey(emailId: string, attachmentId: string, filename: string): string {
+	return `attachments/${emailId}/${attachmentId}/${filename}`;
+}
+
+/**
  * Store base64-encoded attachments to R2 and return metadata for the DO.
  */
 export async function storeAttachments(
@@ -39,7 +47,7 @@ export async function storeAttachments(
 		const attachmentId = crypto.randomUUID();
 		// Sanitize filename to prevent path traversal in R2 keys
 		const safeFilename = (att.filename || "untitled").replace(/[\/\\:*?"<>|\x00-\x1f]/g, "_");
-		const key = `attachments/${emailId}/${attachmentId}/${safeFilename}`;
+		const key = attachmentKey(emailId, attachmentId, safeFilename);
 		const binaryStr = atob(att.content);
 		const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
 		await bucket.put(key, bytes);

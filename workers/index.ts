@@ -7,7 +7,7 @@ import { cors } from "hono/cors";
 import PostalMime from "postal-mime";
 import { z } from "zod";
 import { sendEmail } from "./email-sender";
-import { storeAttachments, type StoredAttachment } from "./lib/attachments";
+import { attachmentKey, storeAttachments, type StoredAttachment } from "./lib/attachments";
 import {
 	validateSender,
 	SenderValidationError,
@@ -113,6 +113,7 @@ app.post("/api/v1/mailboxes", async (c) => {
 	const finalSettings = { ...defaultSettings, ...settings };
 	await c.env.BUCKET.put(key, JSON.stringify(finalSettings));
 	const stub = c.env.MAILBOX.get(c.env.MAILBOX.idFromName(email));
+	await (stub as any).ensureDefaultFolders();
 	await stub.getFolders();
 	return c.json({ id: email, email, name, settings: finalSettings }, 201);
 });
@@ -135,9 +136,29 @@ app.put("/api/v1/mailboxes/:mailboxId", async (c) => {
 
 app.delete("/api/v1/mailboxes/:mailboxId", async (c) => {
 	const mailboxId = c.req.param("mailboxId")!;
-	const key = `mailboxes/${mailboxId}.json`;
-	if (!(await c.env.BUCKET.head(key))) return c.json({ error: "Not found" }, 404);
-	await c.env.BUCKET.delete(key); // TODO: also delete DO data and R2 attachment blobs
+	const settingsKey = `mailboxes/${mailboxId}.json`;
+	const stub = c.env.MAILBOX.get(c.env.MAILBOX.idFromName(mailboxId));
+
+	try {
+		// Remove the settings object first. This prevents new requests (including
+		// inbound mail) from creating data while the two stores are being erased.
+		// The operation is intentionally idempotent: R2 delete succeeds when the
+		// object is already absent, and the DO methods below are no-ops when empty.
+		await c.env.BUCKET.delete(settingsKey);
+
+		// Keep DO metadata until its corresponding R2 objects are gone. If either
+		// store fails, a retry can still discover the same attachment keys and
+		// safely repeat both operations.
+		const attachmentKeys = await (stub as any).getAttachmentKeys() as string[];
+		for (let i = 0; i < attachmentKeys.length; i += 1000) {
+			await c.env.BUCKET.delete(attachmentKeys.slice(i, i + 1000));
+		}
+		await (stub as any).eraseMailboxData();
+	} catch (error) {
+		console.error(`Mailbox erasure incomplete for ${mailboxId}; retry DELETE`, error);
+		return c.json({ error: "Mailbox erasure incomplete; retry the delete request" }, 500);
+	}
+
 	return c.body(null, 204);
 });
 
@@ -189,6 +210,7 @@ app.post("/api/v1/dev/seed", async (c) => {
 
 	// Ensure the Durable Object exists and migrations have run.
 	const stub = c.env.MAILBOX.get(c.env.MAILBOX.idFromName(DEMO_MAILBOX));
+	await (stub as any).ensureDefaultFolders();
 	await stub.getFolders();
 
 	// 2. Idempotency guard — don't pile up duplicates on re-runs.
@@ -421,7 +443,7 @@ app.delete("/api/v1/mailboxes/:mailboxId/emails/:id", async (c: AppContext) => {
 	const id = c.req.param("id")!;
 	const attachments = await c.var.mailboxStub.deleteEmail(id);
 	if (attachments === null) return c.json({ error: "Not found" }, 404);
-	if (attachments.length > 0) await c.env.BUCKET.delete(attachments.map((att: any) => `attachments/${id}/${att.id}/${att.filename}`));
+	if (attachments.length > 0) await c.env.BUCKET.delete(attachments.map((att: any) => attachmentKey(id, att.id, att.filename)));
 	return c.body(null, 204);
 });
 
@@ -528,7 +550,7 @@ app.get("/api/v1/mailboxes/:mailboxId/emails/:emailId/attachments/:attachmentId"
 	const attachmentId = c.req.param("attachmentId")!;
 	const attachment = await c.var.mailboxStub.getAttachment(attachmentId);
 	if (!attachment) return c.json({ error: "Attachment not found" }, 404);
-	const obj = await c.env.BUCKET.get(`attachments/${emailId}/${attachmentId}/${attachment.filename}`);
+	const obj = await c.env.BUCKET.get(attachmentKey(emailId, attachmentId, attachment.filename));
 	if (!obj) return c.json({ error: "Attachment file not found" }, 404);
 	const headers = new Headers();
 	headers.set("Content-Type", attachment.mimetype);

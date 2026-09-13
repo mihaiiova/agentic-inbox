@@ -19,6 +19,13 @@ export type MailboxContext = {
 };
 
 export const requireMailbox = createMiddleware<MailboxContext>(async (c, next) => {
+	// Mailbox deletion is deliberately allowed through without this existence
+	// check so a retry can finish erasing a mailbox after its settings object
+	// has already been removed.
+	if (c.req.method === "DELETE" && /^\/api\/v1\/mailboxes\/[^/]+$/.test(c.req.path)) {
+		return next();
+	}
+
 	const rawId = c.req.param("mailboxId");
 	if (!rawId) return c.json({ error: "Mailbox ID required" }, 400);
 	const mailboxId = decodeURIComponent(rawId);

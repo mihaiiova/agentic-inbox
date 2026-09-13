@@ -9,6 +9,7 @@ import type { SQL } from "drizzle-orm";
 import * as schema from "../db/schema";
 import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
+import { attachmentKey } from "../lib/attachments";
 import { applyMigrations, mailboxMigrations } from "./migrations";
 
 /**
@@ -598,6 +599,60 @@ export class MailboxDO extends DurableObject<Env> {
 				.where(eq(schema.attachments.id, id))
 				.get() ?? null
 		);
+	}
+
+	/**
+	 * Return the R2 keys for all attachment metadata currently in this mailbox.
+	 * The metadata remains in place until `eraseMailboxData` completes so a
+	 * failed R2 operation can be retried without losing the object references.
+	 */
+	async getAttachmentKeys(): Promise<string[]> {
+		const rows = this.ctx.storage.sql.exec(
+			`SELECT email_id, id, filename FROM attachments`,
+		);
+		return [...rows].map((row: any) => attachmentKey(row.email_id, row.id, row.filename));
+	}
+
+	/**
+	 * Permanently erase every mailbox-owned row in one Durable Object
+	 * transaction. R2 objects must be removed by the Worker before this method
+	 * is called; keeping this operation separate makes retries safe when either
+	 * store is temporarily unavailable.
+	 */
+	async eraseMailboxData(): Promise<void> {
+		this.ctx.storage.transactionSync(() => {
+			// Delete join and child rows explicitly rather than relying on runtime
+			// foreign-key configuration. This covers the complete mail-only schema.
+			this.ctx.storage.sql.exec(`DELETE FROM email_labels`);
+			this.ctx.storage.sql.exec(`DELETE FROM attachments`);
+			this.ctx.storage.sql.exec(`DELETE FROM emails`);
+			this.ctx.storage.sql.exec(`DELETE FROM folders`);
+			this.ctx.storage.sql.exec(`DELETE FROM labels`);
+		});
+	}
+
+	/**
+	 * Recreate system folders when an address is created again after erasure.
+	 * The initial migration only runs once per Durable Object ID.
+	 */
+	async ensureDefaultFolders(): Promise<void> {
+		const folders = [
+			[Folders.INBOX, "Inbox"],
+			[Folders.SENT, "Sent"],
+			[Folders.TRASH, "Trash"],
+			[Folders.ARCHIVE, "Archive"],
+			[Folders.SPAM, "Spam"],
+			[Folders.DRAFT, "Drafts"],
+		] as const;
+		this.ctx.storage.transactionSync(() => {
+			for (const [id, name] of folders) {
+				this.ctx.storage.sql.exec(
+					`INSERT OR IGNORE INTO folders (id, name, is_deletable) VALUES (?1, ?2, 0)`,
+					id,
+					name,
+				);
+			}
+		});
 	}
 
 	// ── Folders (Drizzle) ──────────────────────────────────────────
