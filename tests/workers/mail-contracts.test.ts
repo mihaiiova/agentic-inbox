@@ -1,83 +1,21 @@
 import {
 	createExecutionContext,
 	env,
-	SELF,
 	waitOnExecutionContext,
 	runInDurableObject,
 } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import worker from "../workers/app";
-import { Folders } from "../shared/folders";
+import worker from "../../workers/app";
+import { Folders } from "../../shared/folders";
+import { applyMigrations, mailboxMigrations } from "../../workers/durableObject/migrations";
+import {
+	api,
+	cleanupMailboxFixtures,
+	json,
+	mailboxFixture,
+} from "./helpers";
 
-type MailboxStub = DurableObjectStub<any>;
-
-type EmailSeed = {
-	id?: string;
-	subject?: string;
-	sender?: string;
-	recipient?: string;
-	date?: string;
-	body?: string;
-	read?: boolean;
-	starred?: boolean;
-	thread_id?: string | null;
-	message_id?: string | null;
-	in_reply_to?: string | null;
-	email_references?: string | null;
-	cc?: string | null;
-	bcc?: string | null;
-};
-
-const createdMailboxIds: string[] = [];
-
-async function mailboxFixture(label = "mail-contract") {
-	const mailboxId = `${label}-${crypto.randomUUID()}@example.com`;
-	createdMailboxIds.push(mailboxId);
-	await env.BUCKET.put(`mailboxes/${mailboxId}.json`, JSON.stringify({ fromName: label }));
-	const stub = env.MAILBOX.get(env.MAILBOX.idFromName(mailboxId)) as MailboxStub;
-	// The first RPC constructs the object and applies all migrations.
-	await stub.getFolders();
-
-	return {
-		mailboxId,
-		stub,
-		async create(folder: string, seed: EmailSeed = {}, attachments: any[] = []) {
-			const email = {
-				id: seed.id || crypto.randomUUID(),
-				subject: seed.subject || "Contract test message",
-				sender: seed.sender || "sender@example.com",
-				recipient: seed.recipient || mailboxId,
-				date: seed.date || new Date().toISOString(),
-				body: seed.body || "Contract test body",
-				read: seed.read ?? false,
-				starred: seed.starred ?? false,
-				thread_id: seed.thread_id,
-				message_id: seed.message_id,
-				in_reply_to: seed.in_reply_to,
-				email_references: seed.email_references,
-				cc: seed.cc,
-				bcc: seed.bcc,
-			};
-			const linkedAttachments = attachments.map((attachment) => ({ ...attachment, email_id: email.id }));
-			await stub.createEmail(folder, email, linkedAttachments);
-			return email;
-		},
-	};
-}
-
-async function api(path: string, init?: RequestInit) {
-	return SELF.fetch(new Request(`http://localhost${path}`, init));
-}
-
-async function json<T = any>(response: Response): Promise<T> {
-	return response.json() as Promise<T>;
-}
-
-afterEach(async () => {
-	for (const mailboxId of createdMailboxIds.splice(0)) {
-		await env.BUCKET.delete(`mailboxes/${mailboxId}.json`);
-	}
-});
+afterEach(cleanupMailboxFixtures);
 
 describe("MailboxDO mail contract", () => {
 	it("runs every mailbox migration and exposes the canonical folders", async () => {
@@ -94,10 +32,22 @@ describe("MailboxDO mail contract", () => {
 		].sort());
 		await expect(stub.getFolders()).resolves.toHaveLength(6);
 
-		const migrationNames = await runInDurableObject(stub, (_instance, state) => [
-			...state.storage.sql.exec("SELECT name FROM d1_migrations ORDER BY id"),
-		]);
-		expect(migrationNames).toHaveLength(14);
+		const readMigrationNames = () =>
+			runInDurableObject(stub, (_instance, state) =>
+				[...state.storage.sql.exec<{ name: string }>("SELECT name FROM d1_migrations ORDER BY id")].map(
+					({ name }) => name,
+				),
+			);
+		const expectedMigrationNames = mailboxMigrations.map(({ name }) => name);
+		const initialMigrationNames = await readMigrationNames();
+		expect(initialMigrationNames).toEqual(expectedMigrationNames);
+
+		// Re-run the migration runner against this already-initialized DO. It must
+		// leave both the schema and the tracked migration set unchanged.
+		await runInDurableObject(stub, (_instance, state) => {
+			applyMigrations(state.storage.sql, mailboxMigrations, state.storage);
+		});
+		expect(await readMigrationNames()).toEqual(initialMigrationNames);
 	});
 
 	it("supports message create/read/update/delete through the DO RPC seam", async () => {

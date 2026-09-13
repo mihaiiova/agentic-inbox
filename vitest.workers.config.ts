@@ -11,6 +11,6 @@ export default defineConfig({
 	],
 	test: {
 		globals: true,
-		include: ["tests/mail-contracts.test.ts"],
+		include: ["tests/workers/**/*.test.ts"],
 	},
 });
