@@ -1,0 +1,15 @@
+{
+	"name": "agentic-inbox-tests",
+	"main": "./workers/app.ts",
+	"compatibility_date": "2025-11-28",
+	"compatibility_flags": ["nodejs_compat"],
+	"vars": {
+		"DOMAINS": "example.com",
+		"EMAIL_ADDRESSES": []
+	},
+	"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "agentic-inbox-tests" }],
+	"durable_objects": {
+		"bindings": [{ "name": "MAILBOX", "class_name": "MailboxDO" }]
+	},
+	"migrations": [{ "tag": "test-v1", "new_sqlite_classes": ["MailboxDO"] }]
+}

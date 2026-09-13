@@ -9,12 +9,12 @@ export default defineConfig({
 			"shared": path.resolve(__dirname, "shared"),
 		},
 	},
-	esbuild: {
-		jsx: "automatic",
-	},
+	esbuild: { jsx: "automatic" },
 	test: {
 		globals: true,
 		environment: "jsdom",
 		setupFiles: ["./tests/setup.ts"],
+		include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+		exclude: ["tests/workers/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
 	},
 });
