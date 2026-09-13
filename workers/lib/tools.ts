@@ -22,11 +22,13 @@ import {
 	buildQuotedReplyBlock,
 	textToHtml,
 	listMailboxes,
-	generateMessageId,
-	buildReferencesChain,
-	buildThreadingHeaders,
+	resolveOriginalEmail,
 } from "./email-helpers";
-import { sendEmail } from "../email-sender";
+import {
+	dispatchMail,
+	MailDispatchRateLimitError,
+	replyDispatchFields,
+} from "./mail-dispatch";
 import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
 
@@ -36,10 +38,6 @@ type MailboxSearchStub = {
 		query: string;
 		folder?: string;
 	}) => Promise<unknown>;
-};
-
-type RateLimitStub = {
-	checkSendRateLimit: () => Promise<string | null>;
 };
 
 
@@ -379,64 +377,36 @@ export async function toolSendReply(
 	| { error: string }
 > {
 	const stub = getMailboxStub(env, mailboxId);
+	const rawOriginal = (await stub.getEmail(params.originalEmailId)) as EmailFull | null;
+	if (!rawOriginal) return { error: "Original email not found" };
 
-	// Check send rate limit
-	const rateLimitError = await (stub as unknown as RateLimitStub).checkSendRateLimit();
-	if (rateLimitError) {
-		return { error: rateLimitError };
-	}
-
-	const originalEmail = (await stub.getEmail(params.originalEmailId)) as EmailFull | null;
-	if (!originalEmail) {
-		return { error: "Original email not found" };
-	}
-
-	const { originalMsgId, references, threadId } = buildReferencesChain(originalEmail);
-	const fromDomain = mailboxId.split("@")[1];
-	if (!fromDomain) throw new Error("Invalid mailbox email address");
-	const { messageId, outgoingMessageId } = generateMessageId(fromDomain);
-
-	// Append quoted original message
+	const originalEmail = await resolveOriginalEmail(stub, rawOriginal);
+	const threading = replyDispatchFields(originalEmail);
 	const sanitizedBody = params.bodyHtml.trim();
 	const quotedBlock = buildQuotedReplyBlock({
 		date: originalEmail.date,
 		sender: originalEmail.sender || params.to,
 		body: originalEmail.body ?? undefined,
 	});
-	const fullBodyHtml = sanitizedBody + quotedBlock;
 
 	try {
-		await sendEmail(env.EMAIL, {
+		const result = await dispatchMail({
+			env,
+			stub: stub as any,
+			mailboxId,
 			to: params.to,
 			from: mailboxId,
 			subject: params.subject,
-			html: fullBodyHtml,
-			headers: buildThreadingHeaders(originalMsgId, references),
+			html: sanitizedBody + quotedBlock,
+			...threading,
+			markThreadRead: threading.threadId,
 		});
-	} catch (e) {
-		console.error("Email send failed:", (e as Error).message);
-		return { error: `Failed to send reply: ${(e as Error).message}` };
+		return { status: "sent", messageId: result.messageId, message: `Reply sent to ${params.to}` };
+	} catch (error) {
+		console.error("Email send failed:", (error as Error).message);
+		if (error instanceof MailDispatchRateLimitError) return { error: error.message };
+		return { error: `Failed to send reply: ${(error as Error).message}` };
 	}
-
-	await stub.createEmail(
-		Folders.SENT,
-		{
-			id: messageId,
-			subject: params.subject,
-			sender: mailboxId.toLowerCase(),
-			recipient: params.to.toLowerCase(),
-			date: new Date().toISOString(),
-			body: fullBodyHtml,
-			in_reply_to: originalMsgId,
-			email_references:
-				references.length > 0 ? JSON.stringify(references) : null,
-			thread_id: threadId,
-			message_id: outgoingMessageId,
-		},
-		[],
-	);
-
-	return { status: "sent", messageId, message: `Reply sent to ${params.to}` };
 }
 
 // ── send_email ─────────────────────────────────────────────────────
@@ -454,46 +424,21 @@ export async function toolSendEmail(
 	| { error: string }
 > {
 	const stub = getMailboxStub(env, mailboxId);
-
-	// Check send rate limit
-	const rateLimitError = await (stub as unknown as RateLimitStub).checkSendRateLimit();
-	if (rateLimitError) {
-		return { error: rateLimitError };
-	}
-
-	const fromDomain = mailboxId.split("@")[1];
-	if (!fromDomain) throw new Error("Invalid mailbox email address");
-	const { messageId, outgoingMessageId } = generateMessageId(fromDomain);
-
 	const sanitizedBody = params.bodyHtml.trim();
 	try {
-		await sendEmail(env.EMAIL, {
+		const result = await dispatchMail({
+			env,
+			stub: stub as any,
+			mailboxId,
 			to: params.to,
 			from: mailboxId,
 			subject: params.subject,
 			html: sanitizedBody,
 		});
-	} catch (e) {
-		console.error("Email send failed:", (e as Error).message);
-		return { error: `Failed to send email: ${(e as Error).message}` };
+		return { status: "sent", messageId: result.messageId, message: `Email sent to ${params.to}` };
+	} catch (error) {
+		console.error("Email send failed:", (error as Error).message);
+		if (error instanceof MailDispatchRateLimitError) return { error: error.message };
+		return { error: `Failed to send email: ${(error as Error).message}` };
 	}
-
-	await stub.createEmail(
-		Folders.SENT,
-		{
-			id: messageId,
-			subject: params.subject,
-			sender: mailboxId.toLowerCase(),
-			recipient: params.to.toLowerCase(),
-			date: new Date().toISOString(),
-			body: sanitizedBody,
-			in_reply_to: null,
-			email_references: null,
-			thread_id: messageId,
-			message_id: outgoingMessageId,
-		},
-		[],
-	);
-
-	return { status: "sent", messageId, message: `Email sent to ${params.to}` };
 }

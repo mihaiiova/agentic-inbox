@@ -7,6 +7,10 @@
 		"DOMAINS": "example.com",
 		"EMAIL_ADDRESSES": []
 	},
+	"send_email": [{
+		"name": "EMAIL",
+		"allowed_destination_addresses": ["recipient@example.com", "reply@example.com", "forward@example.com", "mcp@example.com"]
+	}],
 	"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "agentic-inbox-tests" }],
 	"durable_objects": {
 		"bindings": [{ "name": "MAILBOX", "class_name": "MailboxDO" }]
