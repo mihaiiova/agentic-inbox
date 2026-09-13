@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import DOMPurify from "dompurify";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatPlainText, isHtml } from "~/lib/utils";
 
 interface EmailIframeProps {
@@ -56,9 +56,12 @@ export default function EmailIframe({ body, autoSize }: EmailIframeProps) {
 		return () => window.removeEventListener("message", handleMessage);
 	}, [handleMessage]);
 
-	useEffect(() => {
-		const iframe = iframeRef.current;
-		if (!iframe || !body) return;
+	// Build the iframe document declaratively (via `srcDoc`) rather than
+	// imperatively setting `iframe.srcdoc` in an effect. Setting `srcdoc`
+	// imperatively is fragile under React StrictMode's double-invoked
+	// effects, which can leave the iframe rendered blank.
+	const srcDoc = useMemo(() => {
+		if (!body) return "";
 
 		const bodyToRender = isHtml(body) ? body : formatPlainText(body);
 		const cleanBody = DOMPurify.sanitize(bodyToRender, {
@@ -87,8 +90,7 @@ export default function EmailIframe({ body, autoSize }: EmailIframeProps) {
 			: "";
 
 		// Use srcdoc so the iframe is truly sandboxed (no same-origin access).
-		// We can't use doc.write() because that requires allow-same-origin.
-		iframe.srcdoc = `<!DOCTYPE html>
+		return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -148,6 +150,7 @@ ul, ol { padding-left: 20px; margin: 4px 0; }
 			style={autoSize ? { height: `${height}px` } : { height: "100%" }}
 			sandbox="allow-scripts allow-popups allow-top-navigation-by-user-activation"
 			title="Email content"
+			srcDoc={srcDoc}
 		/>
 	);
 }

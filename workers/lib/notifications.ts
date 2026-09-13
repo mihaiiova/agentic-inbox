@@ -2,12 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-/**
- * Notification delivery via Pushover.
- *
- * Sends mobile/push notifications for rule actions.
- */
-
+/** Pushover delivery for incoming mail notifications. */
 import type { Env } from "../types";
 
 interface PushoverPayload {
@@ -25,15 +20,6 @@ interface NotificationEmail {
 	sender: string;
 }
 
-/**
- * Send a Pushover notification.
- *
- * @param env - Worker env (must contain PUSHOVER_APP_TOKEN)
- * @param userKey - Pushover user key
- * @param email - Email metadata for default message construction
- * @param overrides - Optional overrides for title, message, priority
- * @returns Success status and optional error message
- */
 export async function sendPushoverNotification(
 	env: Env,
 	userKey: string,
@@ -47,31 +33,20 @@ export async function sendPushoverNotification(
 	},
 ): Promise<{ success: boolean; error?: string }> {
 	const appToken = env.PUSHOVER_APP_TOKEN;
-	if (!appToken) {
-		return { success: false, error: "Pushover app token not configured" };
-	}
-	if (!userKey) {
-		return { success: false, error: "Pushover user key not configured" };
-	}
+	if (!appToken) return { success: false, error: "Pushover app token not configured" };
+	if (!userKey) return { success: false, error: "Pushover user key not configured" };
 
-	const title = overrides?.title || email.subject || "New email";
-	const message = overrides?.message || `From: ${email.sender || "Unknown"}`;
 	const priority = overrides?.priority ?? 0;
-
 	const payload: PushoverPayload = {
 		token: appToken,
 		user: userKey,
-		title,
-		message,
+		title: overrides?.title || email.subject || "New email",
+		message: overrides?.message || `From: ${email.sender || "Unknown"}`,
 	};
-
-	if (priority !== 0) {
-		payload.priority = priority;
-	}
-
+	if (priority !== 0) payload.priority = priority;
 	if (overrides?.url) {
 		payload.url = overrides.url;
-		payload.url_title = overrides.url_title || "View";
+		payload.url_title = overrides.url_title || "View email";
 	}
 
 	try {
@@ -80,35 +55,28 @@ export async function sendPushoverNotification(
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(payload),
 		});
-
 		if (!response.ok) {
-			const text = await response.text();
-			return { success: false, error: `Pushover API error ${response.status}: ${text}` };
+			return { success: false, error: `Pushover API error ${response.status}: ${await response.text()}` };
 		}
-
 		return { success: true };
-	} catch (e) {
-		return { success: false, error: `Pushover request failed: ${(e as Error).message}` };
+	} catch (error) {
+		return { success: false, error: `Pushover request failed: ${(error as Error).message}` };
 	}
 }
 
-/**
- * Read mailbox settings from R2 to get the Pushover user key.
- */
 export async function getMailboxPushoverKey(
 	env: Env,
 	mailboxId: string,
 ): Promise<string | null> {
 	try {
-		const key = `mailboxes/${mailboxId}.json`;
-		const obj = await env.BUCKET.get(key);
+		const obj = await env.BUCKET.get(`mailboxes/${mailboxId}.json`);
 		if (!obj) return null;
 		const settings = await obj.json<Record<string, unknown>>();
 		if (typeof settings.pushoverUserKey === "string" && settings.pushoverUserKey.trim()) {
 			return settings.pushoverUserKey.trim();
 		}
 	} catch {
-		// Fall through to null
+		// Ignore malformed or missing mailbox settings.
 	}
 	return null;
 }

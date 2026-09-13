@@ -13,7 +13,6 @@ export interface MailboxSettings {
 	forwarding?: { enabled: boolean; email: string };
 	signature?: SignatureSettings;
 	autoReply?: { enabled: boolean; subject: string; message: string };
-	agentSystemPrompt?: string;
 	pushoverUserKey?: string;
 }
 
@@ -71,44 +70,4 @@ export interface Folder {
 	id: string;
 	name: string;
 	unreadCount: number;
-}
-
-export interface RuleCondition {
-	field: "from" | "to" | "cc" | "subject" | "body";
-	operator: "contains" | "equals" | "starts_with" | "ends_with" | "matches" | "classification";
-	value: string;
-}
-
-export interface Rule {
-	id: string;
-	name: string;
-	type: string;
-	enabled: number;
-	match_all: number;
-	conditions: string; // JSON array
-	agent_prompt: string | null;
-	action_type: string;
-	action_params: string; // JSON object
-	created_at: string;
-}
-
-export interface RuleLog {
-	id: string;
-	email_id: string;
-	rule_id: string | null;
-	rule_name: string | null;
-	rule_type: string;
-	action_type: string;
-	status: string;
-	details: string; // JSON object
-	created_at: string;
-}
-
-export interface DriveFile {
-	id: string;
-	email_id: string | null;
-	filename: string;
-	mimetype: string;
-	size: number;
-	created_at: string;
 }

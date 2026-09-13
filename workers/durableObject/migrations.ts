@@ -274,4 +274,13 @@ export const mailboxMigrations: Migration[] = [
             CREATE INDEX idx_rule_logs_created_at ON rule_logs(created_at DESC);
         `,
 	},
+	{
+		name: "14_remove_automation_and_drive",
+		sql: txn(`
+            DROP TABLE IF EXISTS execution_logs;
+            DROP TABLE IF EXISTS rule_logs;
+            DROP TABLE IF EXISTS rules;
+            DROP TABLE IF EXISTS drive_files;
+        `),
+	},
 ];

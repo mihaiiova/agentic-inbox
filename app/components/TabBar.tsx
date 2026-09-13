@@ -2,12 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { GearSixIcon, RobotIcon, TrayIcon } from "@phosphor-icons/react";
+import { GearSixIcon, TrayIcon } from "@phosphor-icons/react";
 import { NavLink, useParams } from "react-router";
 
 const TABS = [
 	{ to: "inbox", label: "Inbox", icon: TrayIcon },
-	{ to: "agent", label: "Agent", icon: RobotIcon },
 	{ to: "settings", label: "Settings", icon: GearSixIcon },
 ] as const;
 

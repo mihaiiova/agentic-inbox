@@ -3,11 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 /**
- * Shared tool business logic for the Agent and MCP server.
+ * Shared email tool business logic for the MCP server and HTTP routes.
  *
  * Each function takes an `env: Env` (or a DO stub) and tool-specific params,
  * performs the business logic (DO calls, data fetching, formatting), and
- * returns a plain object. The Agent and MCP server wrap these results in
+ * returns a plain object. The MCP server wraps these results in
  * their own response formats.
  *
  * Functions that already exist in email-helpers.ts (getFullEmail, getFullThread)
@@ -26,7 +26,6 @@ import {
 	buildReferencesChain,
 	buildThreadingHeaders,
 } from "./email-helpers";
-import { verifyDraft } from "./ai";
 import { sendEmail } from "../email-sender";
 import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
@@ -43,29 +42,6 @@ type RateLimitStub = {
 	checkSendRateLimit: () => Promise<string | null>;
 };
 
-type DriveFileStub = {
-	listDriveFiles: (page?: number, limit?: number) => Promise<{
-		files: Array<{
-			id: string;
-			email_id: string | null;
-			filename: string;
-			mimetype: string;
-			size: number;
-			created_at: string;
-		}>;
-		totalCount: number;
-	}>;
-	getDriveFile: (id: string) => Promise<{
-		id: string;
-		email_id: string | null;
-		filename: string;
-		mimetype: string;
-		size: number;
-		r2_key: string;
-		created_at: string;
-	} | null>;
-	deleteDriveFile: (id: string) => Promise<boolean>;
-};
 
 // ── list_mailboxes ─────────────────────────────────────────────────
 
@@ -136,9 +112,6 @@ export async function toolSearchEmails(
  * @param bodyInput - The reply body text. Can be plain text or HTML.
  * @param options.isPlainText - If true, body is treated as plain text and
  *   converted to HTML. If false, body is treated as HTML.
- * @param options.runVerifyDraft - If true, runs AI verifyDraft on the body.
- *   The agent and MCP both do this, but the agent does it on plain text
- *   while MCP does it on HTML.
  */
 export async function toolDraftReply(
 	env: Env,
@@ -149,7 +122,6 @@ export async function toolDraftReply(
 		subject: string;
 		body: string;
 		isPlainText?: boolean;
-		runVerifyDraft?: boolean;
 	},
 ): Promise<
 	| { status: "draft_saved"; draftId: string; message: string; draft: Record<string, string> }
@@ -157,15 +129,7 @@ export async function toolDraftReply(
 > {
 	const stub = getMailboxStub(env, mailboxId);
 
-	// Verify/sanitize if requested
 	let processedBody = params.body.trim();
-	if (params.runVerifyDraft) {
-		const sanitized = await verifyDraft(env.AI, processedBody);
-		if (!sanitized) {
-			return { error: "Draft verification failed — body could not be verified. Please try again." };
-		}
-		processedBody = sanitized;
-	}
 
 	// Convert plain text to HTML if needed
 	if (params.isPlainText) {
@@ -227,7 +191,6 @@ export async function toolDraftEmail(
 		subject: string;
 		body: string;
 		isPlainText?: boolean;
-		runVerifyDraft?: boolean;
 		/** Optional in_reply_to for create_draft style */
 		in_reply_to?: string;
 		/** Optional thread_id for create_draft style */
@@ -240,14 +203,6 @@ export async function toolDraftEmail(
 	const stub = getMailboxStub(env, mailboxId);
 
 	let processedBody = params.body.trim();
-	if (params.runVerifyDraft) {
-		const sanitized = await verifyDraft(env.AI, processedBody);
-		if (!sanitized) {
-			return { error: "Draft verification failed — body could not be verified. Please try again." };
-		}
-		processedBody = sanitized;
-	}
-
 	if (params.isPlainText) {
 		processedBody = textToHtml(processedBody);
 	}
@@ -318,11 +273,7 @@ export async function toolUpdateDraft(
 	// Verify the body BEFORE deleting the old draft to prevent data loss
 	const newDraftId = crypto.randomUUID();
 	const rawBody = params.bodyHtml ?? oldDraft.body ?? "";
-	const verifiedBody = await verifyDraft(env.AI, rawBody);
-
-	if (!verifiedBody) {
-		return { error: "Draft verification failed — keeping existing draft unchanged. Please try again." };
-	}
+	const verifiedBody = rawBody;
 
 	await stub.deleteEmail(params.draftId);
 	await stub.createEmail(
@@ -445,11 +396,8 @@ export async function toolSendReply(
 	if (!fromDomain) throw new Error("Invalid mailbox email address");
 	const { messageId, outgoingMessageId } = generateMessageId(fromDomain);
 
-	// Verify and append quoted original message
-	const sanitizedBody = await verifyDraft(env.AI, params.bodyHtml);
-	if (!sanitizedBody) {
-		return { error: "Draft verification failed — refusing to send unverified content. Please try again." };
-	}
+	// Append quoted original message
+	const sanitizedBody = params.bodyHtml.trim();
 	const quotedBlock = buildQuotedReplyBlock({
 		date: originalEmail.date,
 		sender: originalEmail.sender || params.to,
@@ -517,11 +465,7 @@ export async function toolSendEmail(
 	if (!fromDomain) throw new Error("Invalid mailbox email address");
 	const { messageId, outgoingMessageId } = generateMessageId(fromDomain);
 
-	const sanitizedBody = await verifyDraft(env.AI, params.bodyHtml);
-	if (!sanitizedBody) {
-		return { error: "Draft verification failed — refusing to send unverified content. Please try again." };
-	}
-
+	const sanitizedBody = params.bodyHtml.trim();
 	try {
 		await sendEmail(env.EMAIL, {
 			to: params.to,
@@ -552,41 +496,4 @@ export async function toolSendEmail(
 	);
 
 	return { status: "sent", messageId, message: `Email sent to ${params.to}` };
-}
-
-// ── drive files ────────────────────────────────────────────────────
-
-export async function toolListDriveFiles(
-	env: Env,
-	mailboxId: string,
-	params: { page?: number; limit?: number },
-) {
-	const stub = getMailboxStub(env, mailboxId) as unknown as DriveFileStub;
-	return stub.listDriveFiles(params.page, params.limit);
-}
-
-export async function toolGetDriveFile(
-	env: Env,
-	mailboxId: string,
-	fileId: string,
-) {
-	const stub = getMailboxStub(env, mailboxId) as unknown as DriveFileStub;
-	const file = await stub.getDriveFile(fileId);
-	if (!file) return { error: "Drive file not found" };
-	return file;
-}
-
-export async function toolDeleteDriveFile(
-	env: Env,
-	mailboxId: string,
-	fileId: string,
-) {
-	const stub = getMailboxStub(env, mailboxId) as unknown as DriveFileStub;
-	const file = await stub.getDriveFile(fileId);
-	if (!file) return { error: "Drive file not found" };
-
-	await stub.deleteDriveFile(fileId);
-	await env.BUCKET.delete(file.r2_key);
-
-	return { status: "deleted", fileId, filename: file.filename };
 }

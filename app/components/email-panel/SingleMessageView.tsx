@@ -43,7 +43,7 @@ export default function SingleMessageView({
 				{email.subject}
 			</h2>
 
-			<div className="flex-1 min-h-0 h-screen">
+			<div className="min-h-0">
 				<EmailIframe
 					body={rewriteInlineImages(
 						email.body || "",
@@ -51,6 +51,7 @@ export default function SingleMessageView({
 						email.id,
 						email.attachments,
 					)}
+					autoSize
 				/>
 			</div>
 

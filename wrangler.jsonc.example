@@ -26,8 +26,7 @@
 		// Leave empty "[]" to accept mail for all addresses on the configured DOMAINS.
 		"EMAIL_ADDRESSES": [],
 
-		// Public URL of your deployed worker. Used for clickable links in
-		// Pushover notifications. Example: "https://your-worker.your-account.workers.dev"
+		// Public URL used for links in incoming-mail notifications.
 		"APP_BASE_URL": "https://your-worker.your-account.workers.dev"
 	},
 	"send_email": [
@@ -43,18 +42,11 @@
 			"preview_bucket_name": "agentic-inbox"
 		}
 	],
-	"ai": {
-		"binding": "AI"
-	},
 	"durable_objects": {
 		"bindings": [
 			{
 				"name": "MAILBOX",
 				"class_name": "MailboxDO"
-			},
-			{
-				"name": "EMAIL_AGENT",
-				"class_name": "EmailAgent"
 			},
 			{
 				"name": "EMAIL_MCP",
@@ -67,12 +59,6 @@
 			"tag": "v1",
 			"new_sqlite_classes": [
 				"MailboxDO"
-			]
-		},
-		{
-			"tag": "v2",
-			"new_sqlite_classes": [
-				"EmailAgent"
 			]
 		},
 		{

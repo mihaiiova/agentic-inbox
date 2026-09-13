@@ -10,7 +10,9 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   plugins: [
-    cloudflare({ viteEnvironment: { name: "ssr" } }),
+    // `remoteBindings: false` runs a fully-local dev server without requiring
+    // a Cloudflare account. Set it to true to use remote bindings in dev.
+    cloudflare({ viteEnvironment: { name: "ssr" }, remoteBindings: false }),
     tailwindcss(),
     reactRouter(),
     tsconfigPaths(),

@@ -61,10 +61,15 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
 		return [email, ...threadReplies].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 	}, [email, threadReplies]);
 
-	// Reset expanded state only when the selected email changes, not on every refetch.
-	// Using allMessages as a dependency would reset user expand/collapse state on background refetches.
+	// Reset expanded state when the selected email changes, or when the thread
+	// first loads its replies (message count grows). We depend on the primitive
+	// `allMessages.length` rather than the `allMessages` array so background
+	// refetches (which produce a new array with the same length) don't reset
+	// the user's expand/collapse state.
 	const currentEmailId = email?.id;
-	useEffect(() => { if (allMessages.length > 1) setExpandedMessages(new Set([allMessages[0].id])); }, [currentEmailId]); // eslint-disable-line react-hooks/exhaustive-deps
+	useEffect(() => {
+		if (allMessages.length > 1) setExpandedMessages(new Set([allMessages[0].id]));
+	}, [currentEmailId, allMessages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	const toggleExpand = (msgId: string) => { setExpandedMessages((prev) => { const next = new Set(prev); if (next.has(msgId)) next.delete(msgId); else next.add(msgId); return next; }); };
 

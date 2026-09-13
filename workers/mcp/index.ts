@@ -19,9 +19,6 @@ import {
 	toolSendEmail,
 	toolMarkEmailRead,
 	toolMoveEmail,
-	toolListDriveFiles,
-	toolGetDriveFile,
-	toolDeleteDriveFile,
 } from "../lib/tools";
 import { Folders, FOLDER_TOOL_DESCRIPTION, MOVE_FOLDER_TOOL_DESCRIPTION } from "../../shared/folders";
 import type { Env } from "../types";
@@ -64,7 +61,7 @@ function mcpResult(result: Record<string, unknown>) {
  * `/mcp` endpoint and can list mailboxes, read/search emails,
  * draft replies, send messages, and manage folders.
  */
-export class EmailMCP extends McpAgent<Env> {
+export class EmailMCP extends McpAgent<Cloudflare.Env> {
 	server = new McpServer({
 		name: "agentic-inbox",
 		version: "1.0.0",
@@ -209,7 +206,6 @@ export class EmailMCP extends McpAgent<Env> {
 					subject,
 					body: bodyHtml,
 					isPlainText: false,
-					runVerifyDraft: true,
 				});
 				return mcpResult(result);
 			},
@@ -244,7 +240,6 @@ export class EmailMCP extends McpAgent<Env> {
 					subject,
 					body: bodyHtml,
 					isPlainText: false,
-					runVerifyDraft: true,
 					in_reply_to,
 					thread_id,
 				});
@@ -430,61 +425,6 @@ export class EmailMCP extends McpAgent<Env> {
 					};
 				}
 				return mcpText(result);
-			},
-		);
-
-		// ── list_drive_files ───────────────────────────────────────
-		this.server.tool(
-			"list_drive_files",
-			"List files stored in the mailbox drive. Returns file metadata (id, filename, mimetype, size, created_at).",
-			{
-				mailboxId: z.string().describe("The mailbox email address"),
-				limit: z
-					.number()
-					.default(25)
-					.describe("Maximum number of files to return (1-100)"),
-				page: z
-					.number()
-					.default(1)
-					.describe("Page number for pagination"),
-			},
-			async ({ mailboxId, limit, page }) => {
-				const denied = await verifyMailbox(mailboxId);
-				if (denied) return denied;
-				const result = await toolListDriveFiles(env, mailboxId, { limit, page });
-				return mcpText(result);
-			},
-		);
-
-		// ── get_drive_file ─────────────────────────────────────────
-		this.server.tool(
-			"get_drive_file",
-			"Get metadata for a specific drive file by ID.",
-			{
-				mailboxId: z.string().describe("The mailbox email address"),
-				fileId: z.string().describe("The drive file ID"),
-			},
-			async ({ mailboxId, fileId }) => {
-				const denied = await verifyMailbox(mailboxId);
-				if (denied) return denied;
-				const result = await toolGetDriveFile(env, mailboxId, fileId);
-				return mcpResult(result);
-			},
-		);
-
-		// ── delete_drive_file ──────────────────────────────────────
-		this.server.tool(
-			"delete_drive_file",
-			"Permanently delete a drive file by ID. Also removes the file from storage.",
-			{
-				mailboxId: z.string().describe("The mailbox email address"),
-				fileId: z.string().describe("The drive file ID to delete"),
-			},
-			async ({ mailboxId, fileId }) => {
-				const denied = await verifyMailbox(mailboxId);
-				if (denied) return denied;
-				const result = await toolDeleteDriveFile(env, mailboxId, fileId);
-				return mcpResult(result);
 			},
 		);
 	}

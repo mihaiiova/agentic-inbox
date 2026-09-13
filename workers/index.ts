@@ -20,7 +20,7 @@ import { handleReplyEmail, handleForwardEmail } from "./routes/reply-forward";
 import { Folders } from "../shared/folders";
 import type { Env } from "./types";
 import { requireMailbox, type MailboxContext } from "./lib/mailbox";
-import { sendPushoverNotification, getMailboxPushoverKey } from "./lib/notifications";
+import { getMailboxPushoverKey, sendPushoverNotification } from "./lib/notifications";
 
 type AppContext = Context<MailboxContext>;
 
@@ -29,7 +29,7 @@ type AppContext = Context<MailboxContext>;
 const CreateMailboxBody = z.object({
 	email: z.string().email(),
 	name: z.string().min(1),
-	settings: z.record(z.any()).optional(), // unvalidated — agentSystemPrompt goes straight to AI
+	settings: z.record(z.any()).optional(), // mailbox display and compose settings
 });
 
 const DraftBody = z.object({
@@ -139,6 +139,179 @@ app.delete("/api/v1/mailboxes/:mailboxId", async (c) => {
 	if (!(await c.env.BUCKET.head(key))) return c.json({ error: "Not found" }, 404);
 	await c.env.BUCKET.delete(key); // TODO: also delete DO data and R2 attachment blobs
 	return c.body(null, 204);
+});
+
+app.post("/api/v1/mailboxes/:mailboxId/test-notification", async (c: AppContext) => {
+	const mailboxId = c.req.param("mailboxId")!;
+	const userKey = await getMailboxPushoverKey(c.env, mailboxId);
+	if (!userKey) {
+		return c.json({ success: false, error: "Pushover user key not configured" }, 400);
+	}
+	const result = await sendPushoverNotification(c.env, userKey, {
+		subject: "Agentic Inbox — Test Notification",
+		sender: "Agentic Inbox",
+	}, {
+		title: "Test Notification",
+		message: "Pushover notifications are configured correctly.",
+		url: c.env.APP_BASE_URL || undefined,
+		url_title: "Open Inbox",
+	});
+	return c.json(result, result.success ? 200 : 500);
+});
+
+// -- Dev seed (development only) -----------------------------------
+
+/**
+ * Seeds a demo mailbox with a handful of realistic dummy emails so the UI
+ * has something to show during local development. Idempotent: if the demo
+ * mailbox already has emails, it returns without inserting anything.
+ *
+ * Not available in production (`import.meta.env.DEV` is false in builds).
+ */
+app.post("/api/v1/dev/seed", async (c) => {
+	if (!import.meta.env.DEV) {
+		return c.json({ error: "Not found" }, 404);
+	}
+
+	const DEMO_MAILBOX = "demo@example.com";
+	const mailboxKey = `mailboxes/${DEMO_MAILBOX}.json`;
+
+	// 1. Create the demo mailbox if it doesn't exist yet.
+	if (!(await c.env.BUCKET.head(mailboxKey))) {
+		const settings = {
+			fromName: "Demo Inbox",
+			forwarding: { enabled: false, email: "" },
+			signature: { enabled: false, text: "" },
+			autoReply: { enabled: false, subject: "", message: "" },
+		};
+		await c.env.BUCKET.put(mailboxKey, JSON.stringify(settings));
+	}
+
+	// Ensure the Durable Object exists and migrations have run.
+	const stub = c.env.MAILBOX.get(c.env.MAILBOX.idFromName(DEMO_MAILBOX));
+	await stub.getFolders();
+
+	// 2. Idempotency guard — don't pile up duplicates on re-runs.
+	const existing = await stub.countEmails({ folder: Folders.INBOX });
+	if (existing > 0) {
+		return c.json({ seeded: false, mailbox: DEMO_MAILBOX, existing });
+	}
+
+	// 3. Build dummy emails.
+	const now = Date.now();
+	const hoursAgo = (h: number) => new Date(now - h * 3_600_000).toISOString();
+
+	const threadId = crypto.randomUUID();
+	const originalMessageId = `${crypto.randomUUID()}@example.com`;
+
+	const seedEmails: {
+		folder: string;
+		email: Parameters<typeof stub.createEmail>[1];
+		attachments: Parameters<typeof stub.createEmail>[2];
+	}[] = [
+		// A two-message conversation (same thread_id).
+		{
+			folder: Folders.INBOX,
+			email: {
+				id: crypto.randomUUID(),
+				subject: "Quarterly planning doc",
+				sender: "marcus@example.com",
+				recipient: DEMO_MAILBOX,
+				date: hoursAgo(26),
+				read: true,
+				body: "<p>Hi team,</p><p>I put together a first pass at the quarterly planning doc. Can you take a look before Thursday's sync?</p><p>Thanks,<br/>Marcus</p>",
+				thread_id: threadId,
+				message_id: originalMessageId,
+				in_reply_to: null,
+				email_references: null,
+			},
+			attachments: [],
+		},
+		{
+			folder: Folders.INBOX,
+			email: {
+				id: crypto.randomUUID(),
+				subject: "Re: Quarterly planning doc",
+				sender: "priya@example.com",
+				recipient: DEMO_MAILBOX,
+				date: hoursAgo(24),
+				read: false,
+				body: "<p>This looks great. One note: can we pull the launch timeline forward a week? I'll add comments inline.</p><p>— Priya</p>",
+				thread_id: threadId,
+				message_id: `${crypto.randomUUID()}@example.com`,
+				in_reply_to: originalMessageId,
+				email_references: JSON.stringify([originalMessageId]),
+			},
+			attachments: [],
+		},
+		// A standalone unread email.
+		{
+			folder: Folders.INBOX,
+			email: {
+				id: crypto.randomUUID(),
+				subject: "Your receipt from Acme Coffee",
+				sender: "receipts@acme.example",
+				recipient: DEMO_MAILBOX,
+				date: hoursAgo(2),
+				read: false,
+				body: "<p>Thanks for your order!</p><p>1 × Flat White — $4.50<br/>Total: $4.50</p><p>Have a great day,<br/>Acme Coffee</p>",
+			},
+			attachments: [],
+		},
+		// A starred, already-read email.
+		{
+			folder: Folders.INBOX,
+			email: {
+				id: crypto.randomUUID(),
+				subject: "Flight confirmation — SFO → JFK",
+				sender: "no-reply@airline.example",
+				recipient: DEMO_MAILBOX,
+				date: hoursAgo(49),
+				read: true,
+				starred: true,
+				body: "<p>You're all set!</p><p>Flight 1234 departs SFO at 8:30 AM and arrives JFK at 5:15 PM.</p><p>Safe travels!</p>",
+			},
+			attachments: [],
+		},
+		// A welcome email, read a while ago.
+		{
+			folder: Folders.INBOX,
+			email: {
+				id: crypto.randomUUID(),
+				subject: "Welcome to Agentic Inbox",
+				sender: "team@example.com",
+				recipient: DEMO_MAILBOX,
+				date: hoursAgo(120),
+				read: true,
+				body: "<p>Welcome aboard!</p><p>This is your new inbox. Emails are stored per-mailbox and can be organized with folders and labels.</p>",
+			},
+			attachments: [],
+		},
+		// One outbound message so the Sent folder isn't empty.
+		{
+			folder: Folders.SENT,
+			email: {
+				id: crypto.randomUUID(),
+				subject: "Re: Quarterly planning doc",
+				sender: DEMO_MAILBOX,
+				recipient: "marcus@example.com",
+				date: hoursAgo(23),
+				read: true,
+				body: "<p>Thanks Marcus — reviewing now and will add my comments this afternoon.</p>",
+				thread_id: threadId,
+				message_id: `${crypto.randomUUID()}@example.com`,
+				in_reply_to: originalMessageId,
+				email_references: JSON.stringify([originalMessageId]),
+			},
+			attachments: [],
+		},
+	];
+
+	for (const { folder, email, attachments } of seedEmails) {
+		await stub.createEmail(folder, email, attachments);
+	}
+
+	return c.json({ seeded: true, mailbox: DEMO_MAILBOX, count: seedEmails.length });
 });
 
 // -- Emails ---------------------------------------------------------
@@ -348,136 +521,6 @@ app.delete("/api/v1/mailboxes/:mailboxId/emails/:emailId/labels/:labelId", async
 	return c.body(null, 204);
 });
 
-// -- Rules ----------------------------------------------------------
-
-app.get("/api/v1/mailboxes/:mailboxId/rules", async (c: AppContext) => {
-	return c.json(await c.var.mailboxStub.getRules());
-});
-
-app.post("/api/v1/mailboxes/:mailboxId/rules", async (c: AppContext) => {
-	const body = (await c.req.json()) as {
-		name: string;
-		type?: "static" | "agent";
-		enabled?: boolean;
-		match_all?: boolean;
-		conditions?: Array<{ field: string; operator: string; value: string }>;
-		agent_prompt?: string;
-		action_type: string;
-		action_params: Record<string, unknown>;
-	};
-	if (!body.name?.trim()) return c.json({ error: "Rule name is required" }, 400);
-	if (!body.action_type) return c.json({ error: "Action type is required" }, 400);
-
-	const ruleType = body.type || "static";
-	if (ruleType === "agent") {
-		if (!body.agent_prompt?.trim()) return c.json({ error: "Agent prompt is required for agent rules" }, 400);
-	}
-
-	const result = await c.var.mailboxStub.createRule({
-		id: crypto.randomUUID(),
-		name: body.name.trim(),
-		type: ruleType,
-		enabled: body.enabled ? 1 : 0,
-		match_all: body.match_all !== false ? 1 : 0,
-		conditions: JSON.stringify(body.conditions || []),
-		agent_prompt: body.agent_prompt || null,
-		action_type: body.action_type,
-		action_params: JSON.stringify(body.action_params),
-	});
-	return c.json(result, 201);
-});
-
-app.put("/api/v1/mailboxes/:mailboxId/rules/:id", async (c: AppContext) => {
-	const body = (await c.req.json()) as Partial<{
-		name: string;
-		type: "static" | "agent";
-		enabled: boolean;
-		match_all: boolean;
-		conditions: Array<{ field: string; operator: string; value: string }>;
-		agent_prompt: string;
-		action_type: string;
-		action_params: Record<string, unknown>;
-	}>;
-	const updates: Record<string, unknown> = {};
-	if (body.name !== undefined) updates.name = body.name.trim();
-	if (body.type !== undefined) updates.type = body.type;
-	if (body.enabled !== undefined) updates.enabled = body.enabled ? 1 : 0;
-	if (body.match_all !== undefined) updates.match_all = body.match_all ? 1 : 0;
-	if (body.conditions !== undefined) updates.conditions = JSON.stringify(body.conditions);
-	if (body.agent_prompt !== undefined) updates.agent_prompt = body.agent_prompt || null;
-	if (body.action_type !== undefined) updates.action_type = body.action_type;
-	if (body.action_params !== undefined) updates.action_params = JSON.stringify(body.action_params);
-	const result = await c.var.mailboxStub.updateRule(c.req.param("id")!, updates);
-	return result ? c.json(result) : c.json({ error: "Rule not found" }, 404);
-});
-
-app.delete("/api/v1/mailboxes/:mailboxId/rules/:id", async (c: AppContext) => {
-	await c.var.mailboxStub.deleteRule(c.req.param("id")!);
-	return c.body(null, 204);
-});
-
-app.get("/api/v1/mailboxes/:mailboxId/rule-logs", async (c: AppContext) => {
-	const page = intQuery(c, "page") ?? 1;
-	const limit = intQuery(c, "limit") ?? 50;
-	const stub = c.var.mailboxStub as any;
-	const logs = await stub.getRuleLogs(limit, (page - 1) * limit);
-	return c.json(logs);
-});
-
-app.post("/api/v1/mailboxes/:mailboxId/test-notification", async (c: AppContext) => {
-	const mailboxId = c.req.param("mailboxId");
-	const userKey = await getMailboxPushoverKey(c.env, mailboxId);
-	if (!userKey) {
-		return c.json({ success: false, error: "Pushover user key not configured. Save your Pushover User Key first." }, 400);
-	}
-	const result = await sendPushoverNotification(
-		c.env,
-		userKey,
-		{ subject: "Agentic Inbox — Test Notification", sender: "Agentic Inbox" },
-		{
-			title: "Test Notification",
-			message: "This is a test notification from Agentic Inbox. If you see this, Pushover is configured correctly!",
-			url: c.env.APP_BASE_URL || undefined,
-			url_title: "Open Inbox",
-		},
-	);
-	return c.json(result, result.success ? 200 : 500);
-});
-
-// -- Drive ----------------------------------------------------------
-
-app.get("/api/v1/mailboxes/:mailboxId/drive", async (c: AppContext) => {
-	const page = intQuery(c, "page") ?? 1;
-	const limit = intQuery(c, "limit") ?? 25;
-	const stub = c.var.mailboxStub as any;
-	const result = await stub.listDriveFiles(page, limit);
-	return c.json(result);
-});
-
-app.get("/api/v1/mailboxes/:mailboxId/drive/:fileId/download", async (c: AppContext) => {
-	const fileId = c.req.param("fileId")!;
-	const stub = c.var.mailboxStub as any;
-	const file = await stub.getDriveFile(fileId);
-	if (!file) return c.json({ error: "File not found" }, 404);
-	const obj = await c.env.BUCKET.get(file.r2_key);
-	if (!obj) return c.json({ error: "File blob not found" }, 404);
-	const headers = new Headers();
-	headers.set("Content-Type", file.mimetype);
-	const sanitized = file.filename.replace(/[\x00-\x1f"\\]/g, "_");
-	headers.set("Content-Disposition", `attachment; filename="${sanitized}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
-	return new Response(obj.body, { headers });
-});
-
-app.delete("/api/v1/mailboxes/:mailboxId/drive/:fileId", async (c: AppContext) => {
-	const fileId = c.req.param("fileId")!;
-	const stub = c.var.mailboxStub as any;
-	const file = await stub.getDriveFile(fileId);
-	if (!file) return c.json({ error: "File not found" }, 404);
-	await stub.deleteDriveFile(fileId);
-	await c.env.BUCKET.delete(file.r2_key);
-	return c.body(null, 204);
-});
-
 // -- Attachments ----------------------------------------------------
 
 app.get("/api/v1/mailboxes/:mailboxId/emails/:emailId/attachments/:attachmentId", async (c: AppContext) => {
@@ -570,6 +613,23 @@ async function receiveEmail(event: { raw: ReadableStream; rawSize: number }, env
 		in_reply_to: inReplyTo, email_references: emailReferences.length > 0 ? JSON.stringify(emailReferences) : null,
 		thread_id: threadId, message_id: originalMessageId, raw_headers: JSON.stringify(parsedEmail.headers),
 	}, attachmentData);
+
+	// Notifications are best-effort and must never make Email Routing retry a
+	// message that was already persisted successfully.
+	ctx.waitUntil((async () => {
+		const userKey = await getMailboxPushoverKey(env, mailboxId);
+		if (!userKey) return;
+		const result = await sendPushoverNotification(env, userKey, {
+			subject: parsedEmail.subject || "New email",
+			sender: parsedEmail.from?.address || "Unknown sender",
+		}, {
+			url: env.APP_BASE_URL
+				? `${env.APP_BASE_URL.replace(/\/$/, "")}/mailbox/${encodeURIComponent(mailboxId)}/email/${messageId}`
+				: undefined,
+			url_title: "Open email",
+		});
+		if (!result.success) console.warn("Incoming email notification failed:", result.error);
+	})());
 
 }
 

@@ -27,10 +27,9 @@ describe("TabBar", () => {
 		);
 	}
 
-	it("renders three tabs", () => {
+	it("renders mail and settings tabs", () => {
 		renderWithRouter();
 		expect(screen.getByText("Inbox")).toBeInTheDocument();
-		expect(screen.getByText("Agent")).toBeInTheDocument();
 		expect(screen.getByText("Settings")).toBeInTheDocument();
 	});
 
@@ -46,10 +45,6 @@ describe("TabBar", () => {
 		expect(screen.getByText("Inbox").closest("a")).toHaveAttribute(
 			"href",
 			"/mailbox/test@example.com/inbox"
-		);
-		expect(screen.getByText("Agent").closest("a")).toHaveAttribute(
-			"href",
-			"/mailbox/test@example.com/agent"
 		);
 		expect(screen.getByText("Settings").closest("a")).toHaveAttribute(
 			"href",

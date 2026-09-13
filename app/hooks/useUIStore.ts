@@ -15,7 +15,7 @@ export interface ComposeOptions {
 }
 
 interface UIState {
-	// Side panel state
+	// Message and compose navigation state
 	selectedEmailId: string | null;
 	isComposing: boolean;
 	_previousEmailId: string | null;

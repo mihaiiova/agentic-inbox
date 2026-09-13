@@ -10,7 +10,6 @@ import * as schema from "../db/schema";
 import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
 import { applyMigrations, mailboxMigrations } from "./migrations";
-import { sendPushoverNotification, getMailboxPushoverKey } from "../lib/notifications";
 
 /**
  * SQL expression to normalize email subjects by stripping common
@@ -100,8 +99,6 @@ interface AttachmentData {
 	disposition?: string | null;
 }
 
-import { evaluateRules } from "../orchestrator/evaluate";
-import { orchestrateEmail, buildContext } from "../orchestrator";
 
 export class MailboxDO extends DurableObject<Env> {
 	declare __DURABLE_OBJECT_BRAND: never;
@@ -603,103 +600,6 @@ export class MailboxDO extends DurableObject<Env> {
 		);
 	}
 
-	// ── Drive files ────────────────────────────────────────────────
-
-	async createDriveFile(
-		emailId: string,
-		attachment: {
-			id: string;
-			email_id: string;
-			filename: string;
-			mimetype: string;
-			size: number;
-			content_id?: string | null;
-			disposition?: string | null;
-		},
-		r2Key: string,
-	) {
-		const driveFileId = crypto.randomUUID();
-		this.ctx.storage.sql.exec(
-			`INSERT INTO drive_files (id, email_id, filename, mimetype, size, r2_key)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
-			driveFileId,
-			emailId,
-			attachment.filename,
-			attachment.mimetype,
-			attachment.size,
-			r2Key,
-		);
-		return {
-			id: driveFileId,
-			email_id: emailId,
-			filename: attachment.filename,
-			mimetype: attachment.mimetype,
-			size: attachment.size,
-			r2_key: r2Key,
-			created_at: new Date().toISOString(),
-		};
-	}
-
-	async getDriveFile(id: string) {
-		const rows = [
-			...this.ctx.storage.sql.exec(
-				`SELECT id, email_id, filename, mimetype, size, r2_key, created_at
-				 FROM drive_files WHERE id = ?1`,
-				id,
-			),
-		] as any[];
-		if (rows.length === 0) return null;
-		const row = rows[0];
-		return {
-			id: row.id,
-			email_id: row.email_id ?? null,
-			filename: row.filename,
-			mimetype: row.mimetype,
-			size: row.size,
-			r2_key: row.r2_key,
-			created_at: row.created_at,
-		};
-	}
-
-	async deleteDriveFile(id: string) {
-		this.ctx.storage.sql.exec(`DELETE FROM drive_files WHERE id = ?1`, id);
-		return true;
-	}
-
-	async listDriveFiles(page = 1, limit = 25) {
-		const safeLimit = Math.min(Math.max(limit, 1), 100);
-		const offset = (page - 1) * safeLimit;
-
-		const files = [
-			...this.ctx.storage.sql.exec(
-				`SELECT id, email_id, filename, mimetype, size, created_at
-				 FROM drive_files
-				 ORDER BY created_at DESC
-				 LIMIT ?1 OFFSET ?2`,
-				safeLimit,
-				offset,
-			),
-		] as any[];
-
-		const countRow = [
-			...this.ctx.storage.sql.exec(
-				`SELECT COUNT(*) as total FROM drive_files`,
-			),
-		][0] as { total: number } | undefined;
-
-		return {
-			files: files.map((f) => ({
-				id: f.id,
-				email_id: f.email_id ?? null,
-				filename: f.filename,
-				mimetype: f.mimetype,
-				size: f.size,
-				created_at: f.created_at,
-			})),
-			totalCount: countRow?.total ?? 0,
-		};
-	}
-
 	// ── Folders (Drizzle) ──────────────────────────────────────────
 
 	async getFolders() {
@@ -1007,158 +907,6 @@ export class MailboxDO extends DurableObject<Env> {
 			.run();
 	}
 
-	// ── Rules (Drizzle + raw SQL) ───────────────────────────────────
-
-	async getRules() {
-		return this.db.select().from(schema.rules).all();
-	}
-
-	async createRule(rule: {
-		id: string;
-		name: string;
-		type?: string;
-		enabled?: number;
-		match_all?: number;
-		conditions: string;
-		agent_prompt?: string | null;
-		action_type: string;
-		action_params: string;
-	}) {
-		this.db.insert(schema.rules).values({
-			id: rule.id,
-			name: rule.name,
-			type: rule.type ?? "static",
-			enabled: rule.enabled ?? 1,
-			match_all: rule.match_all ?? 1,
-			conditions: rule.conditions,
-			agent_prompt: rule.agent_prompt ?? null,
-			action_type: rule.action_type,
-			action_params: rule.action_params,
-		}).run();
-		return rule;
-	}
-
-	async updateRule(
-		id: string,
-		updates: {
-			name?: string;
-			type?: string;
-			enabled?: number;
-			match_all?: number;
-			conditions?: string;
-			agent_prompt?: string | null;
-			action_type?: string;
-			action_params?: string;
-		},
-	) {
-		this.db.update(schema.rules).set(updates).where(eq(schema.rules.id, id)).run();
-		return this.db.select().from(schema.rules).where(eq(schema.rules.id, id)).get();
-	}
-
-	async deleteRule(id: string) {
-		this.db.delete(schema.rules).where(eq(schema.rules.id, id)).run();
-		return true;
-	}
-
-	// ── Rule Engine ────────────────────────────────────────────────
-
-	async getRuleLogs(limit = 50, offset = 0) {
-		return this.db
-			.select()
-			.from(schema.ruleLogs)
-			.orderBy(desc(schema.ruleLogs.created_at))
-			.limit(limit)
-			.offset(offset)
-			.all();
-	}
-
-	async #executeRuleAction(
-		email: EmailData,
-		actionType: string,
-		params: Record<string, unknown>,
-	) {
-		switch (actionType) {
-			case "add_label": {
-				const labelId = params.label_id as string;
-				if (labelId) {
-					try {
-						this.db.insert(schema.emailLabels).values({ email_id: email.id, label_id: labelId }).run();
-					} catch {
-						// Unique constraint violation = label already applied, ignore
-					}
-				}
-				break;
-			}
-			case "save_attachment": {
-				const attachments = this.db
-					.select()
-					.from(schema.attachments)
-					.where(eq(schema.attachments.email_id, email.id))
-					.all();
-				if (attachments.length === 0) break;
-
-				for (const att of attachments) {
-					try {
-						const sourceKey = `attachments/${email.id}/${att.id}/${att.filename}`;
-						const obj = await this.env.BUCKET.get(sourceKey);
-						if (!obj) continue;
-
-						// Stream the body into a Uint8Array
-						const chunks: Uint8Array[] = [];
-						const reader = obj.body.getReader();
-						while (true) {
-							const { done, value } = await reader.read();
-							if (done) break;
-							chunks.push(value);
-						}
-						const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-						const blob = new Uint8Array(totalLength);
-						let offset = 0;
-						for (const chunk of chunks) {
-							blob.set(chunk, offset);
-							offset += chunk.length;
-						}
-
-						const driveFileId = crypto.randomUUID();
-						const driveKey = `drive/${driveFileId}/${att.filename}`;
-						await this.env.BUCKET.put(driveKey, blob);
-						await this.createDriveFile(email.id, att, driveKey);
-					} catch (e) {
-						console.warn(`Failed to save attachment ${att.id} to drive:`, (e as Error).message);
-					}
-				}
-				break;
-			}
-			case "send_notification": {
-				try {
-					const userKey = (params.pushover_user_key as string) || await getMailboxPushoverKey(this.env, email.recipient);
-					if (!userKey) {
-						console.warn("Skipping notification: no Pushover user key configured");
-						break;
-					}
-					const result = await sendPushoverNotification(
-						this.env,
-						userKey,
-						{ subject: email.subject || "(no subject)", sender: email.sender || "Unknown" },
-						{
-							title: params.title as string | undefined,
-							message: params.message as string | undefined,
-							priority: params.priority as number | undefined,
-						},
-					);
-					if (!result.success) {
-						console.warn("Pushover notification failed:", result.error);
-					}
-				} catch (e) {
-					console.warn("Failed to send notification:", (e as Error).message);
-				}
-				break;
-			}
-			default:
-				console.warn(`Unknown rule action type: ${actionType}`);
-			}
-	}
-
 	// ── Email creation (Drizzle) ───────────────────────────────────
 
 	async createEmail(
@@ -1210,35 +958,6 @@ export class MailboxDO extends DurableObject<Env> {
 
 		if (attachments.length > 0) {
 			this.db.insert(schema.attachments).values(attachments).run();
-		}
-
-		// Orchestrate inbound emails (only for inbox — sent/draft emails are user-created)
-		if (folderId === Folders.INBOX) {
-			this.ctx.waitUntil(
-				(async () => {
-					try {
-						const rules = await this.getRules();
-						const mailboxId = email.recipient.split(",")[0].trim();
-						const attachmentContext = attachments.map((a) => ({
-							filename: a.filename,
-							mimetype: a.mimetype,
-							size: a.size,
-						}));
-						const ctx = await buildContext(
-							mailboxId,
-							{ ...email, read: !!email.read, starred: !!email.starred, attachments: attachmentContext },
-							this.env,
-						);
-						const plan = await orchestrateEmail(ctx, rules, {
-							db: this.db,
-							sqlExec: (sql: string, ...params: unknown[]) => this.ctx.storage.sql.exec(sql, ...params),
-						});
-						console.log(`[orchestrateEmail] plan executed for ${email.id}: ${plan.actions.length} actions`);
-					} catch (e) {
-						console.error(`[orchestrateEmail] failed for ${email.id}:`, (e as Error).message, (e as Error).stack);
-					}
-				})(),
-			);
 		}
 	}
 }

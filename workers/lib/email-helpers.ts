@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 /**
- * Shared email helpers to eliminate duplication across API routes, MCP, and agent.
+ * Shared email helpers used by the HTTP API and MCP server.
  *
  * Includes: DO stub helpers, sender validation, message-ID generation,
  * threading, HTML utilities, and tool-logic (getFullEmail / getFullThread).

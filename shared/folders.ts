@@ -5,8 +5,8 @@
 /**
  * Canonical folder ID constants.
  *
- * Every part of the stack — API routes, Durable Object, MCP, agent,
- * frontend sidebar — references folder IDs. This module is the single
+ * Every part of the stack — API routes, Durable Object, MCP, and the
+ * frontend — references folder IDs. This module is the single
  * source of truth so we don't scatter magic strings everywhere.
  */
 
@@ -46,7 +46,7 @@ export const FOLDER_DISPLAY_NAMES: Record<string, string> = {
 	[Folders.SPAM]: "Spam",
 };
 
-/** Formatted string for tool parameter descriptions (agent + MCP). */
+/** Formatted string for MCP tool parameter descriptions. */
 export const FOLDER_TOOL_DESCRIPTION =
 	"Folder to list: inbox, sent, draft, archive, trash";
 

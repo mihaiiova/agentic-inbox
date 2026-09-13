@@ -26,16 +26,5 @@ export const queryKeys = {
 	labels: {
 		list: (mailboxId: string) => ["labels", mailboxId] as const,
 	},
-	rules: {
-		list: (mailboxId: string) => ["rules", mailboxId] as const,
-	},
-	ruleLogs: {
-		list: (mailboxId: string, page: number, limit: number) =>
-			["rule-logs", mailboxId, page, limit] as const,
-	},
-	drive: {
-		list: (mailboxId: string, page: number, limit: number) =>
-			["drive", mailboxId, page, limit] as const,
-	},
 	config: ["config"] as const,
 };

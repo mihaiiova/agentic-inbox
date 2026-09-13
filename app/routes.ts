@@ -15,7 +15,6 @@ export default [
 		route("inbox", "routes/inbox.tsx"),
 		route("email/:emailId", "routes/email-detail-route.tsx"),
 		route("compose", "routes/compose-route.tsx"),
-		route("agent", "routes/agent-route.tsx"),
 		route("settings", "routes/settings.tsx"),
 		route("search", "routes/search-results.tsx"),
 	]),

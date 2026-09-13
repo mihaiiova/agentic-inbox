@@ -14,11 +14,9 @@ import {
 	ArchiveIcon,
 	ArrowBendUpLeftIcon,
 	ArrowsClockwiseIcon,
-	Download as DownloadIcon,
 	EnvelopeOpenIcon,
 	EnvelopeSimpleIcon,
 	FileIcon,
-	HardDrivesIcon,
 	MagnifyingGlassIcon,
 	PaperPlaneTiltIcon,
 	PencilSimpleIcon,
@@ -38,11 +36,9 @@ import {
 	useMarkThreadRead,
 	useUpdateEmail,
 } from "~/queries/emails";
-import { useDriveFiles, useDeleteDriveFile } from "~/queries/drive";
 import { useFolders } from "~/queries/folders";
 import { queryKeys } from "~/queries/keys";
 import { useMailbox } from "~/queries/mailboxes";
-import api from "~/services/api";
 import type { Email } from "~/types";
 
 const PAGE_SIZE = 25;
@@ -151,141 +147,6 @@ function FolderEmptyState({
 	);
 }
 
-function formatBytes(bytes: number): string {
-	if (bytes === 0) return "0 B";
-	const k = 1024;
-	const sizes = ["B", "KB", "MB", "GB"];
-	const i = Math.floor(Math.log(bytes) / Math.log(k));
-	return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
-
-function DriveView({ mailboxId }: { mailboxId: string }) {
-	const [page, setPage] = useState(1);
-	const limit = 25;
-	const { data, isLoading } = useDriveFiles(mailboxId, page, limit);
-	const deleteFile = useDeleteDriveFile();
-	const files = data?.files ?? [];
-	const totalCount = data?.totalCount ?? 0;
-
-	const handleDownload = async (fileId: string, filename: string) => {
-		const blob = await api.downloadDriveFile(mailboxId, fileId);
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = filename;
-		a.click();
-		URL.revokeObjectURL(url);
-	};
-
-	const handleDelete = async (fileId: string) => {
-		await deleteFile.mutateAsync({ mailboxId, fileId });
-	};
-
-	if (isLoading) {
-		return (
-			<div className="flex-1 p-6">
-				<div className="text-kumo-subtle">Loading...</div>
-			</div>
-		);
-	}
-
-	if (files.length === 0) {
-		return (
-			<div className="flex-1 p-6 flex flex-col items-center justify-center text-center">
-				<HardDrivesIcon size={48} className="text-kumo-line mb-4" />
-				<h2 className="text-lg font-semibold text-kumo-default mb-1">
-					No files in Drive yet
-				</h2>
-				<p className="text-kumo-subtle text-sm max-w-sm">
-					Create a rule to automatically save attachments from incoming emails.
-				</p>
-			</div>
-		);
-	}
-
-	const totalPages = Math.ceil(totalCount / limit);
-
-	return (
-		<div className="flex-1 p-4 md:p-6">
-			<div className="flex items-center justify-between mb-4">
-				<h2 className="text-base font-semibold text-kumo-default">Drive</h2>
-				<span className="text-sm text-kumo-subtle">
-					{totalCount} file{totalCount !== 1 ? "s" : ""}
-				</span>
-			</div>
-
-			<div className="space-y-2">
-				{files.map((file) => (
-					<div
-						key={file.id}
-						className="flex items-center gap-3 p-3 rounded-lg border border-kumo-line bg-kumo-base hover:bg-kumo-tint transition-colors"
-					>
-						<div className="flex-1 min-w-0">
-							<button
-								type="button"
-								onClick={() => handleDownload(file.id, file.filename)}
-								className="text-sm font-medium text-kumo-default hover:text-kumo-brand truncate block text-left cursor-pointer bg-transparent border-0 p-0"
-							>
-								{file.filename}
-							</button>
-							<div className="flex items-center gap-2 mt-1 text-xs text-kumo-subtle">
-								<span className="px-1.5 py-0.5 rounded bg-kumo-recessed">
-									{file.mimetype.split("/")[1]?.toUpperCase() || file.mimetype}
-								</span>
-								<span>{formatBytes(file.size)}</span>
-								<span>·</span>
-								<span>{new Date(file.created_at).toLocaleDateString()}</span>
-							</div>
-						</div>
-						<div className="flex items-center gap-1">
-							<button
-								type="button"
-								onClick={() => handleDownload(file.id, file.filename)}
-								className="p-2 rounded-md hover:bg-kumo-recessed text-kumo-subtle hover:text-kumo-default transition-colors cursor-pointer"
-								aria-label="Download"
-							>
-								<DownloadIcon size={16} />
-							</button>
-							<button
-								type="button"
-								onClick={() => handleDelete(file.id)}
-								className="p-2 rounded-md hover:bg-kumo-recessed text-kumo-subtle hover:text-kumo-danger transition-colors cursor-pointer"
-								aria-label="Delete"
-							>
-								<TrashIcon size={16} />
-							</button>
-						</div>
-					</div>
-				))}
-			</div>
-
-			{totalPages > 1 && (
-				<div className="flex items-center justify-center gap-2 mt-6">
-					<button
-						type="button"
-						disabled={page <= 1}
-						onClick={() => setPage((p) => p - 1)}
-						className="px-3 py-1.5 text-sm rounded-md border border-kumo-line disabled:opacity-40 cursor-pointer"
-					>
-						Previous
-					</button>
-					<span className="text-sm text-kumo-subtle">
-						Page {page} of {totalPages}
-					</span>
-					<button
-						type="button"
-						disabled={page >= totalPages}
-						onClick={() => setPage((p) => p + 1)}
-						className="px-3 py-1.5 text-sm rounded-md border border-kumo-line disabled:opacity-40 cursor-pointer"
-					>
-						Next
-					</button>
-				</div>
-			)}
-		</div>
-	);
-}
-
 export default function InboxRoute() {
 	const { mailboxId } = useParams<{ mailboxId: string }>();
 	const navigate = useNavigate();
@@ -293,11 +154,8 @@ export default function InboxRoute() {
 	const [searchParams, setSearchParams] = useSearchParams();
 	const { data: currentMailbox } = useMailbox(mailboxId);
 
-	// Determine if we're in drive mode
-	const isDrive = searchParams.get("view") === "drive";
-
 	// Current folder for email list (from query param)
-	const currentFolder = isDrive ? "" : searchParams.get("folder") || Folders.INBOX;
+	const currentFolder = searchParams.get("folder") || Folders.INBOX;
 
 	// Search state
 	const [searchQuery, setSearchQuery] = useState("");
@@ -329,13 +187,12 @@ export default function InboxRoute() {
 	const { data: folders = [] } = useFolders(mailboxId);
 
 	const folderName = useMemo(() => {
-		if (isDrive) return "Drive";
 		const found = folders.find((f) => f.id === currentFolder);
 		if (found) return found.name;
 		return currentFolder
 			? currentFolder.charAt(0).toUpperCase() + currentFolder.slice(1)
 			: "Inbox";
-	}, [folders, currentFolder, isDrive]);
+	}, [folders, currentFolder]);
 
 	// Reset page when folder changes
 	const prevFolderRef = useRef<string>("");
@@ -357,13 +214,9 @@ export default function InboxRoute() {
 		if (e.key === "Enter") handleSearch();
 	};
 
-	const handleFolderChange = (value: string) => {
-		if (!mailboxId) return;
-		if (value === "__drive__") {
-			setSearchParams({ view: "drive" });
-		} else {
-			setSearchParams({ folder: value });
-		}
+	const handleFolderChange = (value: string | null) => {
+		if (!mailboxId || !value) return;
+		setSearchParams({ folder: value });
 	};
 
 	const handleRefresh = () => {
@@ -432,19 +285,18 @@ export default function InboxRoute() {
 	const folderOptions = useMemo(() => {
 		const system = [
 			{ value: Folders.INBOX, label: "Inbox", icon: <TrayIcon size={14} /> },
-			{ value: "__drive__", label: "Drive", icon: <HardDrivesIcon size={14} /> },
 			{ value: Folders.SENT, label: "Sent", icon: <PaperPlaneTiltIcon size={14} /> },
 			{ value: Folders.DRAFT, label: "Drafts", icon: <FileIcon size={14} /> },
 			{ value: Folders.ARCHIVE, label: "Archive", icon: <ArchiveIcon size={14} /> },
 			{ value: Folders.TRASH, label: "Trash", icon: <TrashIcon size={14} /> },
 		];
 		const custom = folders
-			.filter((f) => ![Folders.INBOX, Folders.SENT, Folders.DRAFT, Folders.ARCHIVE, Folders.TRASH].includes(f.id))
+			.filter((f) => !([Folders.INBOX, Folders.SENT, Folders.DRAFT, Folders.ARCHIVE, Folders.TRASH] as string[]).includes(f.id))
 			.map((f) => ({ value: f.id, label: f.name, icon: null }));
 		return [...system, ...custom];
 	}, [folders]);
 
-	const selectValue = isDrive ? "__drive__" : currentFolder;
+	const selectValue = currentFolder;
 
 	return (
 		<div className="flex flex-col min-h-full">
@@ -517,10 +369,7 @@ export default function InboxRoute() {
 
 			{/* Content */}
 			<div className="flex-1">
-				{isDrive ? (
-					<DriveView mailboxId={mailboxId!} />
-				) : (
-					<>
+				<>
 						{/* Folder header */}
 						<div className="flex items-center justify-between px-4 py-2 border-b border-kumo-line">
 							<h1 className="text-sm font-semibold text-kumo-default">
@@ -687,8 +536,7 @@ export default function InboxRoute() {
 								/>
 							</div>
 						)}
-					</>
-				)}
+				</>
 			</div>
 
 			{/* Compose FAB */}
