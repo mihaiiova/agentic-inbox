@@ -23,7 +23,8 @@
 		"dev": "react-router dev",
 		"dev:local": "./scripts/start-dev.sh",
 		"preview": "npm run build && vite preview",
-		"test": "vitest run",
+		"test": "vitest run && npm run test:workers",
+		"test:workers": "vitest run --config vitest.workers.config.ts",
 		"test:watch": "vitest",
 		"typecheck": "npm run cf-typegen && react-router typegen && tsc -b"
 	},
