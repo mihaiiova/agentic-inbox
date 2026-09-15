@@ -6,15 +6,14 @@ import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import PostalMime from "postal-mime";
 import { z } from "zod";
-import { sendEmail } from "./email-sender";
-import { attachmentKey, storeAttachments, type StoredAttachment } from "./lib/attachments";
+import { listMailboxes } from "./lib/email-helpers";
+import { attachmentKey, type StoredAttachment } from "./lib/attachments";
 import {
-	validateSender,
+	dispatchMail,
+	MailDeliveryError,
+	MailDispatchRateLimitError,
 	SenderValidationError,
-	generateMessageId,
-	buildThreadingHeaders,
-	listMailboxes,
-} from "./lib/email-helpers";
+} from "./lib/mail-dispatch";
 import { SendEmailRequestSchema } from "./lib/schemas";
 import { handleReplyEmail, handleForwardEmail } from "./routes/reply-forward";
 import { Folders } from "../shared/folders";
@@ -368,45 +367,31 @@ app.post("/api/v1/mailboxes/:mailboxId/emails", async (c: AppContext) => {
 	const body = SendEmailRequestSchema.parse(await c.req.json());
 	const { to, cc, bcc, from, subject, html, text, attachments, in_reply_to, references, thread_id } = body;
 
-	let toStr: string, fromEmail: string, fromDomain: string;
 	try {
-		({ toStr, fromEmail, fromDomain } = validateSender(to, from, mailboxId));
-	} catch (e) {
-		if (e instanceof SenderValidationError) return c.json({ error: e.message }, 400);
-		throw e;
+		const result = await dispatchMail({
+			env: c.env,
+			stub: c.var.mailboxStub as any,
+			mailboxId,
+			to,
+			from,
+			subject,
+			html,
+			text,
+			cc,
+			bcc,
+			attachments,
+			inReplyTo: in_reply_to,
+			references,
+			threadId: thread_id,
+		});
+		// Preserve the existing HTTP contract; unlike before, delivery is awaited.
+		return c.json({ id: result.messageId, status: "sent" }, 202);
+	} catch (error) {
+		if (error instanceof SenderValidationError) return c.json({ error: error.message }, 400);
+		if (error instanceof MailDispatchRateLimitError) return c.json({ error: error.message }, 429);
+		if (error instanceof MailDeliveryError) return c.json({ error: `Failed to send email: ${error.message}` }, 502);
+		throw error;
 	}
-
-	const { messageId, outgoingMessageId } = generateMessageId(fromDomain);
-	const stub = c.var.mailboxStub;
-	const rateLimitError = await (stub as any).checkSendRateLimit();
-	if (rateLimitError) return c.json({ error: rateLimitError }, 429);
-	const attachmentData = await storeAttachments(c.env.BUCKET, messageId, attachments);
-
-	await stub.createEmail(Folders.SENT, {
-		id: messageId, subject, sender: fromEmail, recipient: toStr,
-		cc: cc ? (Array.isArray(cc) ? cc.join(", ") : cc).toLowerCase() : null,
-		bcc: bcc ? (Array.isArray(bcc) ? bcc.join(", ") : bcc).toLowerCase() : null,
-		date: new Date().toISOString(), body: html || text || "",
-		in_reply_to: in_reply_to || null, email_references: references ? JSON.stringify(references) : null,
-		thread_id: thread_id || in_reply_to || messageId, message_id: outgoingMessageId,
-		raw_headers: JSON.stringify([
-			{ key: "from", value: typeof from === "string" ? from : `${from.name} <${from.email}>` },
-			{ key: "to", value: Array.isArray(to) ? to.join(", ") : to },
-			...(cc ? [{ key: "cc", value: Array.isArray(cc) ? cc.join(", ") : cc }] : []),
-			...(bcc ? [{ key: "bcc", value: Array.isArray(bcc) ? bcc.join(", ") : bcc }] : []),
-			{ key: "subject", value: subject }, { key: "date", value: new Date().toISOString() },
-			{ key: "message-id", value: `<${outgoingMessageId}>` },
-		]),
-	}, attachmentData);
-
-	c.executionCtx.waitUntil(
-		sendEmail(c.env.EMAIL, {
-			to, cc, bcc, from, subject, html, text,
-			attachments: attachments?.map((att) => ({ content: att.content, filename: att.filename, type: att.type, disposition: att.disposition || "attachment", contentId: att.contentId })),
-			...(in_reply_to ? { headers: buildThreadingHeaders(in_reply_to, references || []) } : {}),
-		}).catch((e) => console.error("Deferred email delivery failed:", (e as Error).message)),
-	);
-	return c.json({ id: messageId, status: "sent" }, 202);
 });
 
 app.post("/api/v1/mailboxes/:mailboxId/drafts", async (c: AppContext) => {
