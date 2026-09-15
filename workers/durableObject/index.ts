@@ -821,10 +821,12 @@ export class MailboxDO extends DurableObject<Env> {
 	 * Returns null if under limit, or an error message string if exceeded.
 	 */
 	async checkSendRateLimit(): Promise<string | null> {
+		// Sent dates are stored and exposed as ISO-8601 strings. Normalize them
+		// before comparing with SQLite's space-separated datetime values.
 		const hourRow = [...this.ctx.storage.sql.exec(
 			`SELECT COUNT(*) as cnt FROM emails
 			 WHERE folder_id = ?1
-			   AND date >= datetime('now', '-1 hour')`,
+			   AND datetime(date) >= datetime('now', '-1 hour')`,
 			Folders.SENT,
 		)][0] as { cnt: number } | undefined;
 
@@ -835,7 +837,7 @@ export class MailboxDO extends DurableObject<Env> {
 		const dayRow = [...this.ctx.storage.sql.exec(
 			`SELECT COUNT(*) as cnt FROM emails
 			 WHERE folder_id = ?1
-			   AND date >= datetime('now', '-1 day')`,
+			   AND datetime(date) >= datetime('now', '-1 day')`,
 			Folders.SENT,
 		)][0] as { cnt: number } | undefined;
 
